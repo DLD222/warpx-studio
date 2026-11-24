@@ -94,7 +94,7 @@ def render(iteration_file: str, out_png: str, field: str, component: str | None 
     sl.save(out_png)
 
     finite = data[np.isfinite(data)]
-    return {"ok": True, "out": out_png, "iteration": it, "field": label,
+    return {"ok": True, "out": out_png, "iteration": int(it), "field": label,
             "range": [float(finite.min()), float(finite.max())],
             "shape": [int(nx), int(nz)]}
 

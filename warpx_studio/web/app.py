@@ -17,7 +17,7 @@ from warpx_studio.deck import controls, store
 from warpx_studio.deck.model import Deck, minimal_deck
 from warpx_studio.deck.validate import translate_error, validate
 from warpx_studio import plugins as studio_plugins
-from warpx_studio.live import paraview
+from warpx_studio.live import paraview, renderers
 from warpx_studio.live.service import LiveView, render_frame
 from warpx_studio.runner.binaries import discover
 from warpx_studio.runner.build import BuildJob
@@ -130,6 +130,7 @@ def api_runtime():
     """Show what this standalone installation is configured to use."""
     result = config.summary()
     result["paraview"] = paraview.status()
+    result["renderers"] = renderers.status()
     return result
 
 
@@ -852,10 +853,15 @@ def api_quantities():
     pmd = diag / "paraview.pmd"
     if not pmd.exists():
         raise HTTPException(404, "this run has no openPMD output")
-    reply = live.worker.render({"pmd": str(pmd), "list": True})
-    if not reply.get("ok"):
-        raise HTTPException(500, reply.get("error") or "cannot inspect the output")
-    items = reply.get("quantities", [])
+    try:
+        from warpx_studio.live.quantities import list_quantities
+        items = list_quantities(pmd)
+    except Exception:
+        # Fall back to the ParaView reader for exotic files.
+        reply = live.worker.render({"pmd": str(pmd), "list": True})
+        if not reply.get("ok"):
+            raise HTTPException(500, reply.get("error") or "cannot inspect the output")
+        items = reply.get("quantities", [])
     QUANTITIES_CACHE.update({"run": run, "items": items})
     return {"quantities": items, "diag": str(diag)}
 

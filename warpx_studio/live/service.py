@@ -17,6 +17,7 @@ import threading
 import time
 from pathlib import Path
 
+from .file_utils import iteration_file
 from .paraview import missing_hint, pvpython_path
 
 HERE = Path(__file__).resolve().parent
@@ -119,12 +120,34 @@ class RenderWorker:
 
 
 def render_frame(live: "LiveView", request: dict) -> dict:
-    """Use the publication-style matplotlib path for 2-D scalar/vector frames.
+    """Choose a backend without making ParaView a hard dependency.
 
-    It is deliberately lazy and falls back to ParaView, so a missing matplotlib
-    dependency, a 3-D run, or a particle-overlay request cannot break the live view.
+    Order:
+      1. ``list`` -> h5py quantity catalogue (no ParaView needed);
+      2. suitable 2-D field, no particle/volume -> yt;
+      3. same -> matplotlib;
+      4. 3-D/particles/volume (or all of the above failed) -> pvpython.
     """
-    if not request.get("list") and not request.get("volume") and not request.get("particles"):
+    if request.get("list"):
+        try:
+            from .quantities import list_quantities
+            return {"ok": True, "quantities": list_quantities(request["pmd"],
+                                                               request.get("iteration"))}
+        except Exception:
+            pass  # fall through to the old ParaView lister
+
+    if not request.get("volume") and not request.get("particles"):
+        try:
+            import importlib.util
+            if importlib.util.find_spec("yt") is not None:
+                from .yt_render import render as _yt_render
+                f, it = iteration_file(request["pmd"], request.get("iteration"))
+                reply = _yt_render(str(f), request["out"], request["field"],
+                                   request.get("component"))
+                if reply.get("ok"):
+                    return reply
+        except Exception:
+            pass
         try:
             from .mpl_render import render as _mpl_render
             reply = _mpl_render(request)

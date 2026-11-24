@@ -14,7 +14,7 @@
 ```bash
 git clone <this-repo> warpx-studio
 cd warpx-studio
-python -m pip install -e '.[viz,dev]'
+python -m pip install -e '.[viz,yt,dev]'
 ```
 
 ## 启动
@@ -76,8 +76,28 @@ warpx-studio --root /path/WarpX_plugin
 
 默认安装**不需要 ParaView**：
 
-- 二维标量/矢量场：matplotlib + h5py，直接网页查看；
+- 二维标量/矢量场：**装 yt 时优先 yt**；没有 yt 回退 matplotlib + h5py；
 - 三维、粒子叠加、体积渲染、VTK 导出：需要 `pvpython`。
+
+后端选择顺序（二维场没有 particles/volume 时）：
+
+```text
+list 请求 → h5py 枚举量目录（不需要 ParaView）
+2D 场 → yt（若已安装）
+       → matplotlib + h5py
+       → pvpython
+3D/粒子/体积 → pvpython
+```
+
+安装 yt（二维优先）：
+
+```bash
+python -m pip install -e '.[yt]'
+# 或 conda install -c conda-forge yt
+```
+
+不装 yt 也能用二维图，只是改用 matplotlib；`/api/runtime` 会返回
+`renderers: {matplotlib, h5py, yt}` 和 `paraview: {available, pvpython}`，便于排查环境。
 
 安装一个带 pvpython 的 ParaView：
 
