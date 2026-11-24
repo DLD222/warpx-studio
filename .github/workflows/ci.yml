@@ -14,5 +14,5 @@ jobs:
       - run: python -m compileall -q warpx_studio
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - run: node tests/ui_smoke.js warpx_studio/web/static/index.html warpx_studio/catalog/data
