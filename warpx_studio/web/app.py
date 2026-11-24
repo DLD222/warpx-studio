@@ -17,6 +17,7 @@ from warpx_studio.deck import controls, store
 from warpx_studio.deck.model import Deck, minimal_deck
 from warpx_studio.deck.validate import translate_error, validate
 from warpx_studio import plugins as studio_plugins
+from warpx_studio.live import paraview
 from warpx_studio.live.service import LiveView, render_frame
 from warpx_studio.runner.binaries import discover
 from warpx_studio.runner.build import BuildJob
@@ -127,7 +128,9 @@ def api_binaries():
 @app.get("/api/runtime")
 def api_runtime():
     """Show what this standalone installation is configured to use."""
-    return config.summary()
+    result = config.summary()
+    result["paraview"] = paraview.status()
+    return result
 
 
 @app.get("/api/starter")
@@ -450,12 +453,12 @@ def api_paraview(launch: bool = False):
     pmd = next(iter(sorted(Path(run_dir).rglob("paraview.pmd"))), None)
     if pmd is None:
         raise HTTPException(400, "this run has no openPMD diagnostics")
-    pvpython = os.environ.get(
-        "WARPS_STUDIO_PVPYTHON",
-        os.path.expanduser("~/miniconda3/envs/paraview/bin/pvpython"))
-    export = STUDIO / "warpx_studio/live/export_vtk.py"
+    pvpython = paraview.pvpython_path()
+    if pvpython is None:
+        raise HTTPException(503, paraview.missing_hint())
+    export = HERE.parent / "live/export_vtk.py"
     out_dir = Path(run_dir) / "paraview_vtk"
-    result = subprocess.run([pvpython, str(export), "--pmd", str(pmd),
+    result = subprocess.run([str(pvpython), str(export), "--pmd", str(pmd),
                              "--out", str(out_dir), "--json"],
                             capture_output=True, text=True, timeout=900)
     if result.returncode != 0:
@@ -466,10 +469,10 @@ def api_paraview(launch: bool = False):
     # 只有显式设置环境变量 WARPX_STUDIO_ALLOW_PV_GUI=1 时才允许（默认禁止）。
     launched = False
     if launch and os.environ.get("WARPX_STUDIO_ALLOW_PV_GUI") == "1":
-        gui = shutil.which("paraview") or os.path.expanduser("~/.local/bin/paraview")
-        if Path(gui).exists():
+        gui = paraview.paraview_gui()
+        if gui is not None:
             close_paraview()
-            proc = subprocess.Popen([gui, summary["pvd"]], start_new_session=True,
+            proc = subprocess.Popen([str(gui), summary["pvd"]], start_new_session=True,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             PARAVIEW.update({"proc": proc, "pvd": summary["pvd"]})
             launched = True
@@ -537,7 +540,8 @@ def api_paraview_status():
     proc = PARAVIEW.get("proc")
     return {"running": bool(proc is not None and proc.poll() is None),
             "pid": proc.pid if proc is not None else None,
-            "pvd": PARAVIEW.get("pvd")}
+            "pvd": PARAVIEW.get("pvd"),
+            **paraview.status()}
 
 
 class BuildPayload(BaseModel):

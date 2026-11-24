@@ -17,6 +17,8 @@ import threading
 import time
 from pathlib import Path
 
+from .paraview import missing_hint, pvpython_path
+
 HERE = Path(__file__).resolve().parent
 RENDER = HERE / "render_openpmd.py"
 SERVER = HERE / "render_server.py"
@@ -80,6 +82,8 @@ class RenderWorker:
     def _ensure(self) -> None:
         if self.process is not None and self.process.poll() is None:
             return
+        if not self.pvpython:
+            raise RuntimeError(missing_hint())
         self.process = subprocess.Popen(
             [self.pvpython, str(SERVER)], text=True, bufsize=1,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -89,9 +93,9 @@ class RenderWorker:
         import json
 
         with self._lock:
-            self._ensure()
-            assert self.process is not None
             try:
+                self._ensure()
+                assert self.process is not None
                 self.process.stdin.write(json.dumps(request) + "\n")
                 self.process.stdin.flush()
                 line = self.process.stdout.readline()
@@ -142,8 +146,7 @@ class LiveView:
         self.particles: list[str] = []
         self.fixed_iteration: int | None = None
         self.frames: list[dict] = []
-        self.pvpython = pvpython or os.environ.get(
-            "WARPS_STUDIO_PVPYTHON", os.path.expanduser("~/miniconda3/envs/paraview/bin/pvpython"))
+        self.pvpython = pvpython or pvpython_path()
         self.interval = interval
         self.diag_dir: Path | None = None
         self.iteration: int | None = None

@@ -72,6 +72,39 @@ warpx-studio --root /path/WarpX_plugin
 - 官方 checkout：使用标准 out-of-source CMake，产物写到 `<data>/builds/<name>`；
 - 仍可在输入框里覆盖 `-DWarpX_*` 选项。
 
+## ParaView 是可选后端
+
+默认安装**不需要 ParaView**：
+
+- 二维标量/矢量场：matplotlib + h5py，直接网页查看；
+- 三维、粒子叠加、体积渲染、VTK 导出：需要 `pvpython`。
+
+安装一个带 pvpython 的 ParaView：
+
+```bash
+conda create -n paraview -c conda-forge python=3.11 paraview
+# 路径按你的 conda 安装调整
+export WARPX_STUDIO_PVPYTHON="$HOME/miniconda3/envs/paraview/bin/pvpython"
+```
+
+或者已经有 ParaView：
+
+```bash
+warpx-studio --pvpython /opt/ParaView/bin/pvpython
+```
+
+没装 ParaView 时：
+
+- `/api/paraview/status` 返回 `available: false`；
+- 网页内三维/VTK 请求返回明确的 503 提示；
+- 二维图仍能正常工作，不会因为缺 ParaView 启动失败。
+
+二维回退依赖：
+
+```bash
+python -m pip install -e '.[viz]'    # matplotlib + h5py
+```
+
 ## 设计边界
 
 - **Studio 不是 WarpX**：它只生成/读取 inputs、选择二进制、启动进程、读 openPMD。

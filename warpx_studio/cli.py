@@ -16,6 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data", help="writable data root (projects/runs/builds)")
     parser.add_argument("--projects", help="project directory override")
     parser.add_argument("--runs", help="run output directory override")
+    parser.add_argument("--pvpython", help="ParaView pvpython for 3-D/particles/VTK (optional)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--no-browser", action="store_true")
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         "WARPX_STUDIO_DATA": args.data,
         "WARPX_STUDIO_PROJECTS": args.projects,
         "WARPX_STUDIO_RUNS": args.runs,
+        "WARPX_STUDIO_PVPYTHON": args.pvpython,
     }
     for key, value in env.items():
         if value:
