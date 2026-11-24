@@ -3,10 +3,10 @@
 The form used to live only in the browser tab: closing it lost everything except the
 ``inputs`` file of a finished run.  A project is the missing "document":
 
-    audit_runs/studio_projects/<slug>/project.json   {name, deck, settings, timestamps}
-    audit_runs/studio_projects/<slug>/inputs         a human-readable snapshot
+    <projects>/<slug>/project.json   {name, deck, settings, timestamps}
+    <projects>/<slug>/inputs         a human-readable snapshot
 
-``audit_runs/`` is gitignored, so projects are user data, not repository content.  Saving
+The directory is user data, selected by ``WARPX_STUDIO_PROJECTS`` / ``WARPX_STUDIO_DATA``.  Saving
 is an explicit action from the UI; ``updated`` is bumped every time, and the last opened
 project is remembered so a restarted browser comes back to where it was.
 """
