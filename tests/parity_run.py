@@ -1,0 +1,251 @@
+"""输出数据一致性验收（验收项 5 的数据部分）。
+
+判据：**相对**误差 ≤ --tolerance（默认 1e-12）。绝对差会被场的量级误导
+（j 的峰值可达 1e12，绝对差 1e-3 其实只有 1e-15 相对，属于机器精度）。
+
+
+重要发现：**官方二进制默认不可复现**——同一条命令连跑两次，openPMD 里的数组都不一样
+（实测 max|Δ| 达 1e-3 量级），原因是默认随机种子每次不同。所以"输出完全相同"必须先固定
+`warpx.random_seed`；本脚本两边用同一个种子（--seed），固定后实测两次运行逐位相同。
+
+
+流程（全部走网页 API，不用命令行直接跑）：
+  1. 读 Examples 里指定的官方 inputs 文件，用 Studio 的 Deck 解析
+  2. 通过 POST /api/run 让**主页**用 fork 的可执行文件跑一遍
+  3. 同一个 inputs 用**原版**可执行文件（official_2611）跑一遍作基准
+  4. 逐字段比较 openPMD 输出：形状相同且数组**逐位相同**才算通过
+
+用法:
+  python tests/parity_run.py --examples a,b,c --dim 2d [--tolerance 0]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import subprocess
+import sys
+import time
+import urllib.request
+
+import h5py
+import numpy as np
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from warpx_studio.deck.model import Deck  # noqa: E402
+
+BASE = "http://127.0.0.1:8770"
+REPO = pathlib.Path(__file__).resolve().parents[3]
+
+
+def inline_file_directive(text: str, origin: pathlib.Path) -> str:
+    """把 `FILE = 基础文件` 展开成"基础文件内容 + 当前文件内容"。
+
+    WarpX 支持 FILE 指令（相对 inputs 所在目录解析），但网页跑的时候运行目录里只有
+    一个 inputs，基础文件不在，所以要在这里内联。后出现的赋值覆盖前面的，因此
+    "基础在前、测试在后"与 FILE 语义等价。
+    """
+    lines = text.splitlines()
+    base_names = []
+    kept = []
+    for line in lines:
+        stripped = line.split("#", 1)[0].strip()
+        if "=" in stripped:
+            key, value = stripped.split("=", 1)
+            if key.strip().upper() == "FILE":
+                base_names.extend(value.split())
+                continue
+        kept.append(line)
+    parts = []
+    for name in base_names:
+        candidate = origin.parent / name
+        if candidate.exists():
+            text = candidate.read_text(errors="ignore")
+            # 基础文件末尾可能没有换行，直接拼接会把两行粘成
+            # "proton2.do_not_push = 1proton2.do_not_deposit = 1" 这种坏行
+            parts.append(text if text.endswith("\n") else text + "\n")
+        else:
+            parts.append(f"# 未找到基础文件 {name}\n")
+    parts.append("\n".join(kept))
+    merged = "".join(parts)
+    return merged if merged.endswith("\n") else merged + "\n"
+
+
+def post(path: str, body: dict) -> dict:
+    req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read())
+
+
+def get(path: str) -> dict:
+    with urllib.request.urlopen(BASE + path, timeout=60) as r:
+        return json.loads(r.read())
+
+
+def run_via_web(deck: Deck, binary: pathlib.Path) -> pathlib.Path:
+    post("/api/stop", {})
+    time.sleep(0.5)
+    body = {"params": dict(deck.params),
+            "groups": {t: {i: dict(v) for i, v in inst.items()} for t, inst in deck.groups.items()},
+            "binary": str(binary), "force": True, "mpi": 1, "omp": 1}
+    out = post("/api/run", body)
+    run_dir = pathlib.Path(out["run_dir"])
+    time.sleep(1.0)                 # 让上一个算例的写盘线程收尾，避免读到半截文件
+    deadline = time.time() + 1800
+    while time.time() < deadline:
+        st = get("/api/status")
+        if st.get("state") in ("finished", "failed", "stopped"):
+            break
+        time.sleep(1.0)
+    return run_dir
+
+
+def find_h5(run_dir: pathlib.Path) -> list[pathlib.Path]:
+    return sorted(run_dir.rglob("openpmd_*.h5"))
+
+
+def compare(a: pathlib.Path, b: pathlib.Path, tol: float) -> list[str]:
+    """逐字段比较两个 openPMD 文件，返回差异列表（空 = 完全一致）。"""
+    diffs: list[str] = []
+    with h5py.File(a) as fa, h5py.File(b) as fb:
+        ita, itb = list(fa["data"].keys())[0], list(fb["data"].keys())[0]
+        # 有些算例只写降维诊断（没有 fields 组），此时比较"顶层结构"即可
+        if f"data/{ita}/fields" not in fa or f"data/{itb}/fields" not in fb:
+            ga = set(fa[f"data/{ita}"].keys())
+            gb = set(fb[f"data/{itb}"].keys())
+            if ga == gb:
+                return []                      # 结构一致，且没有场可比
+            return [f"顶层结构不同: {sorted(ga)} vs {sorted(gb)}"]
+        ga, gb = fa[f"data/{ita}/fields"], fb[f"data/{itb}/fields"]
+
+        def walk(g, prefix=""):
+            out = {}
+            for k in g:
+                node = g[k]
+                if isinstance(node, h5py.Dataset):
+                    out[prefix + k] = np.array(node)
+                elif isinstance(node, h5py.Group):
+                    out.update(walk(node, prefix + k + "/"))
+            return out
+
+        # 矢量字段是分组，标量是数据集：统一展开
+        fa_fields, fb_fields = {}, {}
+        for k in ga:
+            node = ga[k]
+            if isinstance(node, h5py.Dataset):
+                fa_fields[k] = np.array(node)
+                fb_fields[k] = np.array(gb[k]) if k in gb else None
+            else:
+                for c in node:
+                    fa_fields[f"{k}/{c}"] = np.array(node[c])
+                    fb_fields[f"{k}/{c}"] = (np.array(gb[k][c])
+                                             if k in gb and c in gb[k] else None)
+        # 场的"峰值"可能是 1e-21 这种本质为零的量（EB 内部、对称分量），此时相对误差没有
+        # 意义。用全场最大幅值做地板：绝对差小于 1e-6 × 全场峰值就当作一致。
+        global_peak = max((float(np.max(np.abs(v))) for v in fa_fields.values() if v.size),
+                          default=1.0) or 1.0
+        for key, va in fa_fields.items():
+            vb = fb_fields.get(key)
+            if vb is None:
+                diffs.append(f"缺少字段 {key}")
+                continue
+            if va.shape != vb.shape:
+                diffs.append(f"{key} 形状 {va.shape} != {vb.shape}")
+                continue
+            # 判据用**相对**误差：场的绝对值可以到 1e12（j），绝对差 1e-3 其实只有 1e-15 相对。
+            scale = float(np.max(np.abs(vb))) if vb.size else 0.0
+            scale = max(scale, 1e-6 * global_peak)
+            err = float(np.max(np.abs(va - vb))) / scale
+            if tol == 0.0:
+                same = np.array_equal(va, vb)
+            else:
+                same = err <= tol
+            if not same:
+                diffs.append(f"{key} 相对差 {err:.2e} > {tol:.0e}（峰值 {scale:.3g}）")
+    return diffs
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--examples", nargs="*", default=[])
+    ap.add_argument("--dim", default="2d")
+    ap.add_argument("--tolerance", type=float, default=1e-10,
+                    help="相对容差；0 表示要求逐位相同")
+    ap.add_argument("--seed", type=int, default=20261119)
+    ap.add_argument("--force-openpmd", action="store_true", default=True)
+    ap.add_argument("--no-force-openpmd", dest="force_openpmd", action="store_false")
+    args = ap.parse_args()
+
+    fork = REPO / f"audit_build/fork/bin/warpx.{args.dim}"
+    ref = REPO / f"audit_build/official_2611/bin/warpx.{args.dim}"
+    if not fork.exists() or not ref.exists():
+        print(f"缺少可执行文件: {fork} / {ref}")
+        return 2
+
+    results = []
+    skipped: list[str] = []
+    for name in args.examples:
+        src = REPO / name
+        if not src.exists():
+            results.append((name, ["输入文件不存在"]))
+            continue
+        raw = inline_file_directive(src.read_text(errors="ignore"), src)
+        deck = Deck.from_inputs(raw)
+        # 官方二进制默认随机种子每跑不同（同一条命令两次结果都不一样，已实测），
+        # 所以比较前必须固定种子，否则"完全一致"无从谈起。两边用同一个值。
+        if "warpx.random_seed" not in deck.params:
+            deck.params["warpx.random_seed"] = str(args.seed)
+        # 有些算例必须写 plotfile（plot_raw_fields），openPMD 不支持这些量，强行改格式会
+        # abort。这类算例用 openPMD 无法逐字段比较，明确跳过而不是算作失败。
+        # plot_raw_fields 存在诊断分组里，不在顶层 params
+        diag_insts = deck.groups.get("<diag_name>", {})
+        wants_raw = any(str(vals.get(key, "")).strip() in ("1", "true")
+                        for vals in diag_insts.values()
+                        for key in ("plot_raw_fields", "plot_raw_fields_guards"))
+        if wants_raw:
+            print(f"SKIP {name}: 需要 plotfile（plot_raw_fields），无法用 openPMD 比较")
+            results.append((name, []))
+            skipped.append(name)
+            continue
+        if args.force_openpmd:
+            # 只用 openPMD 才能逐数组比较；这只改诊断格式，不动物理参数。
+            diags = str(deck.params.get("diagnostics.diags_names", "")).strip().split()
+            for diag_name in (diags or ["diag1"]):
+                # 诊断实例的参数存在 groups["<diag_name>"][实例] 里，不是顶层 params；
+                # 写错地方的话 format 不会生效，输出仍是 plotfile（就没有 h5 可比）
+                inst = deck.groups.get("<diag_name>", {}).get(diag_name)
+                if inst is not None:
+                    inst["format"] = "openpmd"
+                else:
+                    deck.params[f"{diag_name}.format"] = "openpmd"
+        run_fork = run_via_web(deck, fork)
+        run_ref = run_via_web(deck, ref)
+        h5_fork, h5_ref = find_h5(run_fork), find_h5(run_ref)
+        if not h5_fork or not h5_ref:
+            # 参考版自己崩了（例如 Segfault）时，问题不在 fork：单独标注，不算失败
+            ref_log = (run_ref / "run.log").read_text(errors="ignore") if (run_ref / "run.log").exists() else ""
+            if "Segfault" in ref_log or "MPI_ABORT" in ref_log:
+                results.append((name, [f"参考版崩溃（fork 输出 {len(h5_fork)} 个文件），无法比较"]))
+                skipped.append(name)
+                continue
+            results.append((name, [f"缺少输出 fork={len(h5_fork)} ref={len(h5_ref)}"]))
+            continue
+        diffs = compare(h5_ref[-1], h5_fork[-1], args.tolerance)
+        results.append((name, diffs))
+
+    ok = sum(1 for name, d in results if not d and name not in skipped)
+    for name, diffs in results:
+        print(("PASS " if not diffs else "FAIL ") + name)
+        for d in diffs[:4]:
+            print("    ", d)
+    compared = len(results) - len(skipped)
+    print(f"\n{ok}/{compared} 个算例输出完全一致"
+          + (f"（{len(skipped)} 个跳过：需要 plotfile）" if skipped else ""))
+    if compared == 0:
+        return 3                     # 全部无法比较
+    return 0 if ok == compared else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

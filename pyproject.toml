@@ -1,0 +1,24 @@
+[project]
+name = "warpx-studio"
+version = "0.2.0"
+description = "Standalone graphical simulation studio for official WarpX and downstream forks"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.6",
+]
+
+[project.scripts]
+warpx-studio = "warpx_studio.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+# 出版级二维绘图（不装也能回退到 ParaView）
+viz = ["matplotlib>=3.8", "h5py>=3.10"]
+
+[tool.setuptools.packages.find]
+include = ["warpx_studio*"]
+
+[tool.setuptools.package-data]
+"warpx_studio.catalog" = ["data/*.json"]

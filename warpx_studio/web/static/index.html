@@ -1,0 +1,2003 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>WarpX Studio</title>
+<style>
+  :root { --bg:#14161c; --panel:#1c1f27; --line:#2c3140; --fg:#e6e8ee; --dim:#9aa3b5;
+          --acc:#4a9eff; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--fg); height:100vh; display:grid;
+         grid-template-columns:190px 1fr; grid-template-rows:auto 1fr;
+         grid-template-areas:"head head" "nav form"; }
+  header { grid-area:head; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+           padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header input, header select { background:#0f1116; color:var(--fg); border:1px solid var(--line);
+           border-radius:5px; padding:3px 6px; }
+  button { background:#262b36; color:var(--fg); border:1px solid var(--line);
+           border-radius:5px; padding:4px 10px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); color:#06101f; border-color:var(--acc); font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  nav { grid-area:nav; padding:8px; border-right:1px solid var(--line); overflow:auto; }
+  nav button { display:block; width:100%; text-align:left; margin-bottom:5px; }
+  nav button.active { border-color:var(--acc); color:var(--acc); }
+  main { grid-area:form; overflow:auto; padding:10px 14px; }
+  section.group { border:1px solid var(--line); border-radius:7px; margin-bottom:10px;
+          background:var(--panel); }
+  section.group > h3 { margin:0; padding:7px 10px; font-size:13px; cursor:pointer;
+          border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
+  .rows { padding:6px 10px 10px; }
+  .row { display:grid; grid-template-columns:minmax(210px,1fr) 1.1fr; gap:8px;
+         align-items:center; padding:2px 0; }
+  .row label { color:var(--dim); font-size:13px; }
+  .row label b { color:var(--fg); font-weight:500; }
+  .row.err { background:rgba(220,60,60,.12); border-left:3px solid var(--err); padding-left:6px; }
+  .row.err label b { color:var(--err); }
+  nav button.err { border-color:var(--err); color:var(--err); }
+  nav button .badge { background:var(--err); color:#fff; border-radius:9px; padding:0 5px;
+                      margin-left:6px; font-size:11px; }
+  .group.err > h3 { color:var(--err); border-color:var(--err); }
+  /* 输入文本页是独立页面：进入后隐藏导航和表单页，谁也别想把它们再打开 */
+  body.text-mode nav,
+  body.text-mode #page-input,
+  body.text-mode #page-vis { display: none !important; }
+  body:not(.text-mode) #page-text { display: none !important; }
+  .row input { background:#0f1116; color:var(--fg); border:1px solid var(--line);
+         border-radius:4px; padding:3px 6px; width:100%; font-family:ui-monospace,monospace; }
+  .row .hint { grid-column:1/-1; color:var(--dim); font-size:12px; margin:-2px 0 6px; }
+  .badge { font-size:11px; color:var(--warn); border:1px solid var(--warn);
+           border-radius:4px; padding:0 4px; margin-left:6px; }
+  .card { border:1px dashed var(--line); border-radius:6px; padding:8px; margin:8px 0; }
+  .card header { display:flex; gap:8px; align-items:center; padding:0 0 6px; all:unset;
+                 display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .warn { margin:10px 0; padding:8px 10px; border-radius:6px; font-size:13px; }
+  .warn.bad { background:#3a1d1d; border:1px solid var(--err); }
+  .warn.tip { background:#2a2416; border:1px solid var(--warn); }
+  #live { width:100%; background:#000; min-height:200px; object-fit:contain; }
+  #meta { font-size:12px; color:var(--dim); padding:4px 8px; }
+  #log { flex:1; margin:0; padding:8px; overflow:auto; font-size:11.5px; color:#c9d1d9;
+         background:#0d0f13; border-top:1px solid var(--line); white-space:pre-wrap; }
+  #status { margin-left:auto; display:flex; gap:12px; align-items:center; font-size:13px; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:5px; }
+  progress { width:150px; height:8px; }
+</style>
+</head>
+<body>
+<header>
+  <select id="dims" title="维度：切换后按该维度重建起步模板并过滤二进制">
+    <option value="1d">1D</option><option value="2d" selected>2D</option>
+    <option value="3d">3D</option><option value="rz">RZ</option>
+  </select>
+  <select id="binary" title="选择可执行文件（文件名里带构建特性）"></select>
+  <label>MPI <input id="mpi" type="number" min="1" value="1" style="width:52px"></label>
+  <label>线程 <input id="omp" type="number" min="1" value="1" style="width:52px"></label>
+  <label>实时场 <select id="livefield"><option>rho</option><option>rho_electrons</option><option>rho_protons</option><option>E</option><option>B</option></select></label>
+  <select id="livecomp"><option value="">-</option><option>x</option><option>y</option><option>z</option></select>
+  <button id="run" class="primary">▶ 运行</button>
+  <button id="stop" disabled>■ 停止</button>
+  <button id="pause" disabled>⏸ 暂停</button>
+  <button id="resume" disabled>▶ 继续</button>
+  <select id="project" title="已保存的任务（项目）"></select>
+  <button id="project-new" title="新建任务">＋ 新建</button>
+  <button id="project-save" title="保存当前任务（同名覆盖）">💾 保存</button>
+  <button id="project-saveas" title="另存为新任务">另存为</button>
+  <button id="project-delete" title="删除当前任务">🗑</button>
+  <button id="project-clear-outputs" title="删除这个项目的全部运行输出（保留项目定义和 inputs）">🧹 删除输出</button>
+  <span id="project-state" style="font-size:12px;color:var(--dim)">未保存</span>
+  <label style="font-size:12px;color:var(--dim)" title="派生/别名的参数默认折叠，勾选后显示">
+    <input type="checkbox" id="show-derived"> 显示派生参数</label>
+  <label style="font-size:12px;color:var(--dim)" title="默认关闭：不检查、不标红、不拦运行">
+    <input type="checkbox" id="validation-on"> 输入校验</label>
+  <button id="preview" title="打开输入文本页（可直接手写，与表单同步）">📄 输入文本</button>
+  <button id="paraview" title="在网页内交互查看（旋转/缩放/回放），不再弹外部窗口">🔍 网页内查看</button>
+  <button id="paraview-close" title="强制杀掉所有 ParaView 进程（外部窗口关不掉时用这个）">✕ 关闭 ParaView</button>
+  <select id="checkpoint" title="从某个 checkpoint 继续算"><option value="">（无 checkpoint）</option></select>
+  <button id="restart" title="把选中 checkpoint 设为 amr.restart 并运行">⏩ 续算</button>
+  <span id="status"><span class="dot" style="background:var(--dim)"></span>空闲</span>
+</header>
+
+<nav>
+  <button data-step="1" class="active">1 运行控制·网格·边界</button>
+  <button data-step="2">2 粒子/激光/碰撞</button>
+  <button data-step="3">3 求解器·场·外场</button>
+  <button data-step="4">4 诊断输出</button>
+  <button data-step="5">5 插件</button>
+  <button data-step="6">6 构建</button>
+  <button data-step="7">7 可视化输出</button>
+</nav>
+
+<main>
+  <div id="warn"></div>
+  <section id="page-input">
+    <div id="paths" style="display:none;padding:6px 8px;font-size:12px;color:var(--dim);
+         border-bottom:1px solid var(--line);margin-bottom:6px"></div>
+    <div id="form"></div>
+  </section>
+  <section id="page-text">
+    <div style="display:flex;gap:8px;align-items:center;padding:8px 0;flex-wrap:wrap">
+      <b style="font-size:14px">输入文本</b>
+      <span id="text-status" style="font-size:12px;color:var(--dim)">未修改</span>
+      <button id="text-save" style="font-size:13px;font-weight:500">💾 保存</button>
+      <button id="text-back" style="font-size:13px;margin-left:auto">← 返回表单</button>
+    </div>
+    <textarea id="inputs-text" spellcheck="false" wrap="off"
+      style="width:100%;box-sizing:border-box;height:calc(100vh - 190px);padding:12px;
+             font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;
+             background:#ffffff;color:#111111;border:1px solid var(--line);border-radius:6px;
+             resize:none;outline:none;tab-size:4"></textarea>
+  </section>
+  <section id="page-vis" style="display:none">
+    <div id="vis-paths" style="padding:6px 8px;font-size:12px;color:var(--dim);
+         border-bottom:1px solid var(--line);margin-bottom:6px"></div>
+    <div id="live-vis" style="padding:0 8px 8px">  <div style="display:flex;gap:4px;flex-wrap:wrap;padding:6px;font-size:12px;align-items:center">
+    <span style="color:var(--dim)">场:</span>
+    <label><input type="checkbox" class="livefield" value="rho" checked> rho</label>
+    <label><input type="checkbox" class="livefield" value="rho_electrons"> n<sub>e</sub></label>
+    <label><input type="checkbox" class="livefield" value="rho_protons"> n<sub>p</sub></label>
+    <label><input type="checkbox" class="livefield" value="E"> E</label>
+    <label><input type="checkbox" class="livefield" value="B"> B</label>
+    <label><input type="checkbox" id="liveparticles"> 粒子</label>
+    <select id="liveiter" title="回放历史迭代"><option value="">跟随最新</option></select>
+    <button id="liveapply">应用</button>
+    <button id="export">导出帧序列</button>
+  </div>
+  </div>
+    <div id="livegrid" style="display:grid;grid-template-columns:1fr;gap:4px;padding:0 8px"></div>
+    <section id="replay" style="padding:8px 6px;border-top:1px solid var(--line);margin-top:8px">
+    <h3 style="margin:0 0 6px">回放与图片</h3>
+    <div style="display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap">
+      <label>物理量
+        <select id="rp-field"><option value="">（运行后自动列出）</option></select>
+      </label>
+      <label id="rp-comp-label">分量
+        <select id="rp-comp"></select>
+      </label>
+      <label><input type="checkbox" id="rp-particles"> 叠加粒子（默认关闭，避免遮挡场）</label>
+    </div>
+    <div style="margin-top:6px">
+      <input type="range" id="rp-slider" min="0" max="0" value="0" style="width:100%"
+             title="拖动查看不同时刻的可视化">
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--dim)">
+        <span id="rp-iter">—</span><span id="rp-count">—</span>
+      </div>
+    </div>
+    <div id="rp-image-wrap" style="margin-top:6px;text-align:center">
+      <img id="rp-image" alt="回放画面" style="max-width:100%;background:#000;display:none">
+      <div id="rp-empty" style="color:var(--dim);font-size:12px">尚无回放画面</div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:6px">
+      <input id="rp-name" placeholder="图片名称（留空自动命名）"
+             style="flex:1;background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 6px">
+      <button id="rp-save">💾 保存图片</button>
+    </div>
+    <div id="rp-gallery" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:8px"></div>
+  </section>
+    <div id="meta" style="padding:6px 8px;font-size:12px;color:var(--dim)">尚未开始计算</div>
+    <pre id="log" style="margin:0 8px 8px;max-height:220px;overflow:auto;font-size:11.5px"></pre>
+  </section>
+</main>
+
+
+<script>
+const STEP_CATEGORIES = {
+  1: ["control", "mesh", "boundary", "eb"],
+  2: ["species", "laser", "collision", "qed"],
+  3: ["solver_choice", "solver", "extern", "parallel"],
+  4: ["diag"],
+};
+const STEP_GROUPS = {
+  1: ["(root)", "geometry", "amr", "boundary"],
+  2: ["particles", "<species_name>", "<laser_name>"],
+  3: ["algo", "warpx", "psatd", "hybrid_pic_model", "<solver_name>"],
+  4: ["diagnostics", "<diag_name>", "<reduced_diags_name>", "collisions", "<collision_name>"],
+};
+const TEMPLATE_ALIAS = { "<species>": "<species_name>" };
+const TEMPLATE_BASE = { "<species_name>": "species", "<collision_name>": "collision",
+  "<diag_name>": "diag", "<reduced_diags_name>": "rdiag", "<laser_name>": "laser",
+  "<solver_name>": "solver" };
+let CATALOG = null, ZH = null, DECK = { params: {}, groups: {} }, STEP = 1, BINARIES = [];
+let CONTROLS = { field_bc: [], particle_bc: [], boundary_keys: {}, templates: {} };
+let CATALOG_CATEGORIES = [], PARAM_BY_NAME = {}, ENUMS = {};
+let VALIDATION_ON = false;        // 输入校验总开关：默认关闭（不报错、不标红、不拦运行）
+// 用户手写并保存过的原文：默认以它为准，不再用生成器覆盖（注释、#define、排版都要留住）
+let SAVED_TEXT = null;
+// 谁是"最新的一份"：true = 文本框里的原文，false = 表单(deck)。
+// 以前运行总是优先发 SAVED_TEXT，于是"加载过文本的项目后改表单/换项目"都会
+// 把旧文本原样发出去，看起来就是"改了完全不生效"。现在只有文本确实比表单新时才用它。
+let TEXT_AHEAD = false;
+let ERR_PARAMS = new Set();          // 校验报错的参数名：渲染时给对应行标红
+let ERR_STEPS = new Map();           // 每个步骤的错误条数：侧边栏角标
+let GLOSSARY = {}, DERIVED = {}, SHOW_DERIVED = false, HINTS = {};
+let PROJECT_NAME = "", PROJECT_SAVED_AT = "", DIRTY = true;
+
+// keepText=true 用于只改运行设置（二进制/MPI/线程）的场合：这些不属于 inputs 文本，
+// 不能让用户手写的原文因此作废。
+function markDirty(keepText) {
+  DIRTY = true;
+  if (!keepText) TEXT_AHEAD = false;
+  const el = document.getElementById("project-state");
+  if (el) { el.style.color = "var(--warn)"; el.textContent = "未保存"; }
+}
+function markSaved(at) {
+  DIRTY = false; PROJECT_SAVED_AT = at || "";
+  const el = document.getElementById("project-state");
+  if (el) { el.style.color = "var(--ok)"; el.textContent = "已保存 " + (at || "").slice(11, 19); }
+}
+function deckSettings() {
+  return {
+    binary: document.getElementById("binary").value,
+    mpi: Number(document.getElementById("mpi").value) || 1,
+    omp: Number(document.getElementById("omp").value) || 1,
+    live_fields: [...document.querySelectorAll(".livefield:checked")].map(x => x.value),
+    live_particles: document.getElementById("liveparticles")?.checked ? ["electrons"] : [],
+  };
+}
+function applySettings(settings) {
+  if (!settings) return;
+  if (settings.binary) {
+    // 只有该维度的二进制列表里确实有这个文件时才恢复，否则 select.value 会被
+    // 置空（浏览器行为），下一次运行就会发一个空 binary 给后端。
+    const sel = document.getElementById("binary");
+    const options = Array.from(sel.children || []);
+    if (options.some(o => o.value === settings.binary)) sel.value = settings.binary;
+  }
+  if (settings.mpi) document.getElementById("mpi").value = settings.mpi;
+  if (settings.omp) document.getElementById("omp").value = settings.omp;
+  if (Array.isArray(settings.live_fields)) {
+    document.querySelectorAll(".livefield").forEach(cb => {
+      cb.checked = settings.live_fields.includes(cb.value);
+    });
+  }
+  if (settings.live_particles) document.getElementById("liveparticles").checked = settings.live_particles.length > 0;
+}
+
+// geometry.dims 是 "1"/"2"/"3"/"RZ"；顶栏下拉框用的是 "1d"/"2d"/"3d"/"rz"。
+// 项目切换时必须先把维度对上，再重建二进制列表，否则拿到的还是旧维度的可执行文件。
+function normalizeDims(value) {
+  const name = String(value ?? "").trim().toUpperCase();
+  return ({ "1": "1d", "2": "2d", "3": "3d", "RZ": "rz" })[name] || null;
+}
+
+async function refreshProjects(selectName) {
+  const data = await (await fetch("/api/projects")).json();
+  const select = document.getElementById("project");
+  select.innerHTML = '<option value="">（未命名任务）</option>';
+  for (const p of data.projects) {
+    const o = document.createElement("option");
+    o.value = p.name;
+    // RZ 不能再加 D（以前显示成 "RZD"），1/2/3 才是 "2D" 这种写法
+    const dimsLabel = String(p.dims || "?").toUpperCase() === "RZ" ? "RZ" : `${p.dims}D`;
+    o.textContent = `${p.name} · ${dimsLabel} · ${p.species} 物种 · ${(p.updated || "").slice(5, 16)}`;
+    o.title = p.notes || "";
+    select.appendChild(o);
+  }
+  if (selectName) select.value = selectName;
+  return data;
+}
+
+async function loadProject(name) {
+  let response, data;
+  try {
+    response = await fetch("/api/projects/" + encodeURIComponent(name));
+    data = await response.json();
+  } catch (err) {
+    setStatus("打开任务失败：" + ((err && err.message) || "网络错误"), "var(--err)");
+    return false;
+  }
+  // 以前这里不看 r.ok：项目名里带 "/" 时后端 404，data 只有 {detail}，
+  // 下一行 data.deck.params 抛异常 → 整个切换静默失败，页面还停在上一个项目。
+  if (!response.ok || !data || !data.deck) {
+    const why = (data && data.detail) || ("HTTP " + response.status);
+    setStatus("打开任务失败：" + why, "var(--err)");
+    return false;
+  }
+
+  const deck = data.deck;
+  DECK.params = deck.params || {};
+  DECK.groups = deck.groups || {};
+
+  // 1) 先对齐维度：二进制下拉是按维度过滤的，顺序反了就会把二进制设为 ""。
+  const dims = normalizeDims(DECK.params["geometry.dims"]);
+  if (dims) document.getElementById("dims").value = dims;
+  fillBinaries(document.getElementById("dims").value);
+
+  // 2) 恢复该任务的运行设置（二进制只有在当前维度列表里存在时才生效）。
+  applySettings(data.settings || {});
+
+  PROJECT_NAME = data.name;
+  SAVED_TEXT = typeof data.inputs === "string" && data.inputs.trim() ? data.inputs : null;
+  const ta = document.getElementById("inputs-text");
+  if (ta) {
+    ta.value = SAVED_TEXT || "";
+    TEXT_AHEAD = SAVED_TEXT !== null;
+  }
+  document.getElementById("project").value = data.name;
+  render();
+  // 文本页正开着时，显示的必须是新任务的原文（以前这里不动 textarea，
+  // 用户看到旧项目的内容、一点运行又原样把旧文本发出去）。
+  if (document.body.classList.contains("text-mode")) {
+    if (SAVED_TEXT !== null) setTextStatus("未修改", "var(--dim)");
+    else { setTextStatus("正在按表单生成…", "var(--dim)"); formToText(); }
+  }
+  markSaved(data.updated);
+  setStatus("已打开任务：" + data.name, "var(--ok)");
+  return true;
+}
+
+async function saveProject(name) {
+  const preview = await (await fetch("/api/preview", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(DECK) })).json();
+  const ta = document.getElementById("inputs-text");
+  // 只有文本确实比表单新时才保存原文；否则保存表单生成的版本，
+  // 否则会出现"project.json 里的 deck 是新的、inputs 还是旧的"这种自相矛盾状态。
+  const text = TEXT_AHEAD ? ((ta && ta.value) || SAVED_TEXT || "") : "";
+  const inputs = text.trim() ? text : preview.inputs;
+  const r = await fetch("/api/projects", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, deck: DECK, settings: deckSettings(), inputs }) });
+  const out = await r.json();
+  if (!r.ok) { setStatus("保存失败: " + (out.detail || ""), "var(--err)"); return false; }
+  SAVED_TEXT = inputs;
+  // 文本页开着且还有没点「保存」的编辑时，不要用生成结果覆盖用户正在写的文本；
+  // 这时保存的是表单(deck)，文本仍然是"未保存"状态（运行也仍以 deck 为准）。
+  const keepUnsavedEdits = document.body.classList.contains("text-mode") && !TEXT_AHEAD;
+  if (ta && ta.value !== inputs && !keepUnsavedEdits) ta.value = inputs;
+  TEXT_AHEAD = !keepUnsavedEdits;
+  PROJECT_NAME = name;
+  await refreshProjects(name);
+  markSaved(out.updated);
+  setStatus("已保存：" + name, "var(--ok)");
+  return true;
+}
+function axisLabels() {
+  const raw = String(DECK.params["geometry.dims"] || "2").trim().toUpperCase();
+  const axes = (CONTROLS.axes || {})[raw];
+  if (axes) return axes;                    // 后端给定的唯一标准：1D=z，2D=x-z，3D=x-y-z，RZ=r-z
+  if (raw === "1") return ["z"];
+  if (raw === "3") return ["x", "y", "z"];
+  return ["x", "z"];
+}
+const NDIMS = () => axisLabels().length;
+const isExpressionKey = (name) => /\(x\s*,\s*y\s*,\s*z\)$/.test(name) || name.endsWith("_function");
+
+const groupOf = (name) => {
+  if (name.startsWith("<")) return name.split(">")[0] + ">";
+  return name.includes(".") ? name.split(".")[0] : "(root)";
+};
+const paramsOf = (group) => CATALOG.params.filter(p => groupOf(p.name) === group);
+const label = (name) => ZH.params[name] || name.split(".").slice(-1)[0];
+const docOf = (name) => (CATALOG.params.find(p => p.name === name) || {}).doc || "";
+const typeOf = (name) => (CATALOG.params.find(p => p.name === name) || {}).type || "";
+const guardOf = (name) => (CATALOG.build_guards || {})[name] || [];
+
+function deckGet(name) {
+  if (DECK.params[name] !== undefined) return DECK.params[name];
+  const m = name.match(/^<[a-z_]+>\.(.+)$/);
+  if (m) {
+    const inst = Object.values(DECK.groups[name.split(".")[0].replace(">.", ">")] || {});
+    for (const v of inst) if (v[m[1]] !== undefined) return v[m[1]];
+  }
+  return "";
+}
+// 取"规则里那个参数"的实际值。模板参数（<species_name>.profile）必须按实例去
+// DECK.groups 里取，不能拼成 "ions.profile" —— 那样 deckGet 永远返回空串，
+// 取值门控就全部失效（这正是之前"选不同值没反应"的原因）。
+function ruleValue(param, instance) {
+  const tm = String(param).match(/^(<[a-z_]+>)\.(.+)$/);
+  if (tm) {
+    const key = TEMPLATE_ALIAS[tm[1]] || tm[1];
+    if (instance) {
+      const inst = (DECK.groups[key] || {})[instance];
+      const v = inst ? inst[tm[2]] : undefined;
+      return v === undefined ? "" : v;
+    }
+    return deckGet(param);          // 没有实例上下文时退化为第一个实例
+  }
+  return deckGet(param);
+}
+
+function ruleSatisfied(rule, instance) {
+  const raw = String(ruleValue(rule.param, instance) ?? "").replace(/"/g, "").trim();
+  const value = raw.toLowerCase();
+  if (rule.op === "truthy") return ["1", "true", "t", "yes"].includes(value);
+  if (rule.op === "falsy") return !["1", "true", "t", "yes"].includes(value);
+  if (rule.op === "nonempty") return raw !== "" && value !== "none";
+  if (rule.op === "notequals") return value !== String(rule.value ?? "").toLowerCase();
+  if (rule.op === "contains") return value.includes(String(rule.value ?? "").toLowerCase());
+  if (rule.op === "empty") return raw === "";
+  if (rule.op === "in") {
+    // 一个选择器有多个取值都读这个参数（例如注入方式 NUniform/NRandom/NFlux）
+    const allowed = String(rule.value ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+    return allowed.includes(value);
+  }
+  if (rule.op === "member") {
+    // 顶层列表里包含当前实例名（例如 particles.rigid_injected_species = ions）
+    if (!instance) return false;
+    const list = String(ruleValue(rule.param, null) ?? "").replace(/"/g, "").trim();
+    return list.split(/\s+/).includes(String(instance));
+  }
+  return value === String(rule.value).toLowerCase();
+}
+function hiddenAsDerived(name) {
+  return !SHOW_DERIVED && Object.prototype.hasOwnProperty.call(DERIVED, name);
+}
+
+function visible(name, instance) {
+  if (hiddenAsDerived(name)) return false;
+  const rules = (CATALOG.gating_rules || {})[name];
+  if (!rules || !rules.length) return true;
+  // 一条规则 = 单个条件；一条规则是数组 = 多个条件"与"（用于两级联动，
+  // 例如 momentum_distribution_type=maxwellian 且 maxwellian_u_std_distribution_type=parser）
+  return rules.some((r) => (Array.isArray(r)
+    ? r.every((x) => ruleSatisfied(x, instance))
+    : ruleSatisfied(r, instance)));
+}
+
+// 一行是否要标红：模板行 <species_name>.density 对应实例行 ions.density，
+// 两种写法都要能匹配上校验结果。
+function rowHasError(name, instance) {
+  if (!ERR_PARAMS || !ERR_PARAMS.size) { return false; }
+  if (ERR_PARAMS.has(name)) { return true; }
+  if (!instance) { return false; }
+  const key = TEMPLATE_ALIAS[String(name).split(">")[0] + ">"] || String(name).split(">")[0] + ">";
+  const sub = String(name).slice(String(name).indexOf(">") + 2);
+  if (key === String(name).split(">")[0] + ">") { return ERR_PARAMS.has(`${instance}.${sub}`); }
+  return ERR_PARAMS.has(`${instance}.${sub}`);
+}
+
+function inputRow(name, value, onchange, instance) {
+  const wrap = document.createElement("div");
+  wrap.className = "row";
+  wrap.dataset.param = name;                       // 校验报错时按名字定位这一行
+  if (rowHasError(name, instance)) { wrap.classList.add("err"); }
+  if (instance) { wrap.dataset.instance = String(instance); }
+  const type = typeOf(name), guard = guardOf(name), zh = ZH.params[name];
+  const lab = document.createElement("label");
+  lab.innerHTML = `<b>${name.split(".").slice(innerInstance(name) ? 1 : 0).join(".") || name}</b>` +
+    `<br><span style="font-size:12px;color:var(--dim)">${zh || type || ""}</span>`;
+  // 提示只写中文：说明 + 类型 + 构建条件（英文原文不再显示）
+  lab.title = (zh || "") + (type ? `\n类型: ${type}` : "") +
+    (guard.length ? `\n构建条件: ${guard.join("; ")}` : "");
+  const box = document.createElement("div");
+  // 常数外场是一个 3 分量向量（二维也要 Bz / Ez）。给它三个明确的输入框，
+  // 避免用户以为“没有 B_z”，也避免手写空格分隔时漏掉第三个分量。
+  if (name === "warpx.B_external_grid" || name === "warpx.E_external_grid") {
+    const letters = name.includes(".B_") ? ["Bx", "By", "Bz"] : ["Ex", "Ey", "Ez"];
+    const initial = String(value || "").trim().split(/\s+/);
+    const parts = letters.map((letter, i) => {
+      const inp = document.createElement("input");
+      inp.value = initial[i] || "0";
+      inp.placeholder = i === 2 ? "0" : "0";
+      inp.title = letter + (name.includes(".B_") ? "（T）" : "（V/m）");
+      inp.style.cssText = "width:95px;background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 5px;margin-right:4px";
+      const lab2 = document.createElement("span");
+      lab2.textContent = letter + " ";
+      lab2.style.cssText = "font-size:12px;color:var(--dim)";
+      const cell = document.createElement("span");
+      cell.append(lab2, inp);
+      return {cell, inp};
+    });
+    const commit = () => onchange(parts.map(x => x.inp.value.trim() || "0").join(" "));
+    parts.forEach(x => { x.inp.onchange = () => { commit(); markDirty(); scheduleValidate(); };
+                         x.inp.oninput = () => { commit(); markDirty(); };
+                         box.appendChild(x.cell); });
+    wrap.append(lab, box);
+    return wrap;
+  }
+  if (CONTROLS.boundary_keys && CONTROLS.boundary_keys[name]) {
+    const kind = CONTROLS.boundary_keys[name];
+    const choices = kind === "field" ? CONTROLS.field_bc : CONTROLS.particle_bc;
+    const current = String(value || "").trim().split(/\s+/);
+    const parts = [];
+    const labels = axisLabels();
+    for (let i = 0; i < NDIMS(); i++) {
+      const select = document.createElement("select");
+      select.style.cssText = "background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px;margin-right:4px";
+      for (const option of choices) {
+        const e = document.createElement("option");
+        e.value = option; e.textContent = `${labels[i]}: ${option}`;
+        select.appendChild(e);
+      }
+      const initial = current[i] || "periodic";
+      if (!choices.includes(initial)) {
+        const e = document.createElement("option"); e.value = initial; e.textContent = `${labels[i]}: ${initial}`;
+        select.appendChild(e);
+      }
+      select.value = initial;
+      parts.push(select);
+    }
+    const commit = () => onchange(parts.map(x => x.value).join(" "));
+    parts.forEach(x => { x.onchange = () => { commit(); markDirty(); scheduleFormRender(); };
+                         box.appendChild(x); });
+    wrap.append(lab, box);
+    return wrap;
+  }
+  if (isExpressionKey(name)) {
+    const area = document.createElement("textarea");
+    area.value = value || "";
+    area.rows = 2;
+    area.style.cssText = "width:100%;background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:4px;font-family:ui-monospace,monospace";
+    area.oninput = () => { onchange(area.value); markDirty(); scheduleValidate(); };
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:6px;margin-top:4px;align-items:center";
+    const tpl = document.createElement("select");
+    tpl.style.cssText = "background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px";
+    tpl.innerHTML = '<option value="">插入模板…</option>' +
+      Object.keys(CONTROLS.templates || {}).map(k => `<option value="${k}">${k}</option>`).join("");
+    tpl.onchange = () => {
+      if (!tpl.value) return;
+      area.value = CONTROLS.templates[tpl.value];
+      onchange(area.value); scheduleValidate();
+    };
+    const check = document.createElement("button");
+    check.textContent = "检查表达式";
+    const verdict = document.createElement("span");
+    verdict.style.cssText = "font-size:12px";
+    check.onclick = async () => {
+      const constants = Object.keys(DECK.params)
+        .filter(k => k.startsWith("my_constants.")).map(k => k.slice("my_constants.".length));
+      const r = await fetch("/api/expression/check", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: area.value, constants }) });
+      const out = await r.json();
+      if (out.problems.length) { verdict.style.color = "var(--err)"; verdict.textContent = out.problems.join("；"); }
+      else if (out.warnings.length) { verdict.style.color = "var(--warn)"; verdict.textContent = out.warnings[0]; }
+      else { verdict.style.color = "var(--ok)"; verdict.textContent = "语法 OK"; }
+    };
+    bar.append(tpl, check, verdict);
+    box.append(area, bar);
+    wrap.append(lab, box);
+    return wrap;
+  }
+  let options = (CATALOG.params.find(p => p.name === name) || {}).options || [];
+  if (!options.length) options = ENUMS[name] || [];
+  if (!options.length && name.endsWith("_init_style")) {
+    options = (name.includes("particle") ? (CONTROLS.style_options || {}).particle
+                                         : (CONTROLS.style_options || {}).grid) || [];
+  }
+  // 下拉框自己会加一个"（未设置）"；options 里若混进空串就会出现两个（截图 bug）
+  options = [...new Set(options.filter(o => String(o).trim() !== ""))];
+  let inp;
+  if (options.length) {
+    inp = document.createElement("select");
+    inp.style.cssText = "background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:3px 6px;width:100%";
+    const blank = document.createElement("option");
+    blank.value = ""; blank.textContent = "（未设置）";
+    inp.appendChild(blank);
+    const gloss = GLOSSARY[name] || {};
+    for (const opt of [...new Set([...options, ...(value ? [value] : [])])]) {
+      const e = document.createElement("option"); e.value = opt; e.textContent = opt;
+      if (gloss[opt]) e.title = gloss[opt];
+      inp.appendChild(e);
+    }
+    inp.value = value || "";
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size:11.5px;color:var(--dim);margin-top:2px;min-height:14px";
+    const showHint = () => { hint.textContent = gloss[inp.value] ? "· " + gloss[inp.value] : ""; };
+    showHint();
+    inp.onchange = () => {
+      onchange(inp.value); showHint(); markDirty(); scheduleValidate();
+      scheduleFormRender();          // 值变了，依赖参数要跟着显示/隐藏
+    };
+  } else {
+    inp = document.createElement("input");
+    inp.value = value || "";
+    const param = CATALOG.params.find(p => p.name === name) || {};
+    inp.placeholder = exampleFor(param, type);
+    inp.oninput = () => { onchange(inp.value); markDirty(); scheduleValidate(); };
+    // 文本输入在失焦/回车时再重渲染：填了 collision_names、eb 几何这类开关后，
+    // 它们的依赖参数要立刻出现
+    inp.onchange = () => { onchange(inp.value); markDirty(); scheduleValidate();
+                           scheduleFormRender(); };
+  }
+  box.appendChild(inp);
+  if (HINTS[name]) {
+    const valueHint = document.createElement("div");
+    valueHint.className = "hint";
+    valueHint.textContent = HINTS[name];
+    box.appendChild(valueHint);
+  }
+  if (guard.length) { const b = document.createElement("span"); b.className = "badge";
+    b.textContent = "构建条件"; b.title = guard.join("; "); lab.appendChild(b); }
+  const rules = (CATALOG.gating_rules || {})[name];
+  if (rules) { const b = document.createElement("span"); b.className = "badge";
+    b.textContent = "条件"; b.title = rules.map(r => r.raw).join("\n"); lab.appendChild(b); }
+  wrap.append(lab, box);
+  return wrap;
+}
+const innerInstance = (name) => name.startsWith("<");
+
+// grey example inside the box: the documented default when there is one, else a
+// type-appropriate sample so an empty field still says what to type
+function exampleFor(param, type) {
+  const axes = axisLabels();
+  if (param.name === "amr.n_cell") return "例如 " + axes.map(() => 64).join(" ") + "（" + axes.join(" ") + "）";
+  if (param.name === "geometry.prob_lo" || param.name === "geometry.prob_hi")
+    return "例如 " + axes.map(() => "0.0").join(" ") + "（" + axes.join(" ") + "）";
+  if (param.name && /^boundary\.(field|particle)_(lo|hi)$/.test(param.name))
+    return "例如 " + axes.map(() => "periodic").join(" ") + "（每个方向一个）";
+  if (param.name && param.name.startsWith("boundary.potential_"))
+    return "例如 0.0（伏特；0 = 接地导体壁）";
+  if (param.name === "warpx.const_dt") return "例如 1.0e-15（秒）";
+  if (param.name === "warpx.B_external_grid") return "例如 0 1.0e6 0（Bx By Bz，T）";
+  if (param.name === "warpx.E_external_grid") return "例如 0 0 -1.0e6（Ex Ey Ez，V/m）";
+  if (param.name === "warpx.cfl") return "例如 0.5（无量纲）";
+  const nm = param.name || "";
+  if (/\.(ux|uy|uz)_(mean|m)$/.test(nm)) return "例如 0.1（≈0.1c，无量纲）";
+  if (/\.(ux|uy|uz)_(std|th)$/.test(nm)) return "例如 0.01（≈1%c 热展宽，无量纲）";
+  if (/\.(ux|uy|uz)$/.test(nm)) return "例如 0.1（≈0.1c，无量纲）";
+  if (nm.endsWith("temperature_in_eV")) return "例如 10（eV）";
+  const t = String(type || "").toLowerCase();
+  const fallback = t.includes("int") && t.includes("list") ? "例如 64 64"
+    : t.includes("int") ? "例如 10"
+    : t.includes("float") || t.includes("real") ? "例如 1.0e-6"
+    : t.includes("string") || t.includes("strings") ? "例如 periodic"
+    : "例如 1";
+  const def = param.default;
+  if (def !== null && def !== undefined && String(def).trim() !== "") {
+    const text = String(def).trim();
+    return text.length > 34 ? "默认 " + text.slice(0, 34) + "…" : "默认 " + text;
+  }
+  if (param.options && param.options.length) return "选择其一，例如 " + param.options[0];
+  return fallback;
+}
+
+async function renderBuild() {
+  document.getElementById("page-input").style.display = "";
+  document.getElementById("page-vis").style.display = "none";
+  renderPaths("paths");
+  const form = document.getElementById("form");
+  const dims = document.getElementById("dims").value;
+  form.innerHTML = `
+    <section class="group"><h3><span>从源码构建 WarpX</span><span style="color:var(--dim)">${dims.toUpperCase()}</span></h3>
+      <div class="rows">
+        <div class="row"><label><b>选项</b><br><span style="font-size:12px;color:var(--dim)">留空即用本仓库 audit_build 的已验证配置；构建目录在 audit_runs/studio_builds/</span></label>
+          <div><input id="build-name" placeholder="名称（可选）" style="width:48%"> <input id="build-jobs" type="number" value="12" min="1" style="width:22%"></div></div>
+        <div class="row"><label><b>操作</b></label><div><button id="build-start" class="primary">开始构建</button></div></div>
+      </div>
+      <div class="rows"><pre id="build-log" style="max-height:280px;overflow:auto;font-size:11.5px;background:#0d0f13;padding:8px;border-radius:6px">（未开始）</pre></div>
+    </section>`;
+  document.getElementById("build-start").onclick = async () => {
+    const body = { dims, jobs: Number(document.getElementById("build-jobs").value) || 8 };
+    const name = document.getElementById("build-name").value.trim();
+    if (name) body.name = name;
+    const r = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+    const out = await r.json();
+    document.getElementById("build-log").textContent = r.ok ? "已启动: " + out.dir : "启动失败: " + out.detail;
+    pollBuild();
+  };
+  pollBuild();
+}
+
+async function pollBuild() {
+  const pre = document.getElementById("build-log");
+  if (!pre) return;
+  const s = await (await fetch("/api/build/status")).json();
+  if (s.state && s.state !== "idle") {
+    pre.textContent = `[${s.state}] ${s.elapsed}s
+` + (s.log || []).join("\n");
+    pre.scrollTop = pre.scrollHeight;
+    if (s.state === "configure" || s.state === "build") setTimeout(pollBuild, 2000);
+    if (s.state === "finished") {
+      refreshCheckpoints();
+      // 新构建的产物要立刻出现在顶栏下拉里（以前只有刷新页面才看得到，
+      // 用户会以为"刚编出来的版本不能用"）；并直接选中它。
+      await refreshBinaries();
+      const built = BINARIES.find(b => b.dims === s.dims
+        && b.path.startsWith(String(s.dir) + "/bin/"));
+      if (built) {
+        document.getElementById("binary").value = built.path;
+        markDirty(true);
+        pre.textContent += `\n已选中新构建: ${built.path}`;
+      }
+    }
+  }
+}
+
+// 实时帧刷新（之前只有调用、没有定义，第 7 步一渲染就抛
+// "refreshLive is not defined"，表现成保存文本时报"解析失败"）
+async function refreshLive() {
+  const meta = document.getElementById("meta");
+  try {
+    const s = await (await fetch("/api/status")).json();
+    const live = s.live || {};
+    if (meta) {
+      meta.textContent = live.meta && live.meta.summary
+        ? live.meta.summary + (live.meta.ok ? "" : "（渲染失败）")
+        : "等待第一个输出迭代…";
+    }
+    const grid = document.getElementById("livegrid");
+    const frames = live.frames || [];
+    if (grid && frames.length) {
+      if (grid.childElementCount !== frames.length) {
+        grid.innerHTML = frames.map(f => `<img alt="${f.field}" style="width:100%;background:#000">`).join("");
+      }
+      frames.forEach((f, i) => {
+        const img = grid.children[i];
+        if (img && f.png) {
+          img.src = "/api/frame?field=" + encodeURIComponent(f.field) + "&t=" + Date.now();
+        }
+      });
+    }
+  } catch (e) { /* 离线/未运行时静默 */ }
+}
+
+// ---- 表单模块：openPMD / HDF5 输出设置 -------------------------------
+// 这个模块属于“4 诊断输出”的参数表单；它写 diagnosis.format/backend 和
+// HDF5 根属性。物理场/粒子记录仍由 WarpX 诊断决定。
+function buildHdf5Module() {
+  const sec = document.createElement("section");
+  sec.className = "group";
+  const head = document.createElement("h3");
+  head.innerHTML = '<span>openPMD / HDF5 输出</span><span style="color:var(--dim)">元数据与格式</span>';
+  const body = document.createElement("div");
+  body.className = "rows";
+  sec.append(head, body);
+
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.cssText = "display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:4px 8px";
+  const mkSelect = (id, options) => {
+    const sel = document.createElement("select");
+    sel.id = id;
+    sel.style.cssText = "background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 5px";
+    for (const [value, text] of options) {
+      const o = document.createElement("option"); o.value = value; o.textContent = text; sel.appendChild(o);
+    }
+    return sel;
+  };
+  const diagSel = mkSelect("h5-diag", []);
+  const fmtSel = mkSelect("h5-format", [["openpmd", "openpmd"], ["plotfile", "plotfile"], ["checkpoint", "checkpoint"]]);
+  const beSel = mkSelect("h5-backend", [["h5", "h5（HDF5，推荐）"], ["bp", "bp（ADIOS2）"]]);
+  const intInput = document.createElement("input");
+  intInput.id = "h5-intervals"; intInput.type = "number"; intInput.min = "1"; intInput.step = "1";
+  intInput.value = "1"; intInput.title = "每隔多少步写一次该诊断；1 = 每步";
+  intInput.style.cssText = "width:90px;background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 5px";
+  for (const [labelText, el] of [["诊断", diagSel], ["格式", fmtSel], ["openPMD 后端", beSel], ["每隔步数", intInput]]) {
+    const lab = document.createElement("label");
+    lab.style.cssText = "font-size:12px;color:var(--dim)";
+    lab.append(labelText + " ", el);
+    row.appendChild(lab);
+  }
+  body.appendChild(row);
+
+  const note = document.createElement("div");
+  note.style.cssText = "padding:4px 10px;font-size:12px;color:var(--dim);line-height:1.5";
+  note.textContent = "自定义 HDF5 根属性（JSON，可选）。算例结束后写入每个 openpmd_*.h5 的根 attributes；只写元数据，不能新增物理场。";
+  body.appendChild(note);
+
+  const meta = document.createElement("textarea");
+  meta.id = "h5-meta"; meta.spellcheck = false; meta.rows = 4;
+  meta.placeholder = '{"author": "杜良多", "comment": "中性电子/正电子注入", "institution": "..."}';
+  meta.style.cssText = "width:calc(100% - 20px);box-sizing:border-box;margin:4px 10px;padding:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;resize:vertical";
+  body.appendChild(meta);
+
+  const foot = document.createElement("div");
+  foot.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 10px;font-size:12px";
+  const apply = document.createElement("button");
+  apply.id = "h5-apply"; apply.textContent = "写入 Deck / 保存项目"; apply.style.fontSize = "12px";
+  const full = document.createElement("button");
+  full.id = "h5-full"; full.textContent = "全量字段/物种"; full.style.fontSize = "12px";
+  full.title = "把当前诊断改成：openpmd+h5、每步、所有场、所有物种密度/温度/每格粒子数、全部粒子变量";
+  const status = document.createElement("span"); status.id = "h5-status"; status.style.color = "var(--dim)";
+  foot.append(apply, full, status); body.appendChild(foot);
+
+  const names = String(deckGet("diagnostics.diags_names") || "").trim().split(/\s+/).filter(Boolean);
+  diagSel.innerHTML = "";
+  if (names.length) {
+    for (const n of names) {
+      const o = document.createElement("option"); o.value = n; o.textContent = n; diagSel.appendChild(o);
+    }
+    diagSel.value = names[0];
+  } else {
+    const o = document.createElement("option"); o.value = "";
+    o.textContent = "（先在下方诊断列表里填 diagnostics.diags_names）"; diagSel.appendChild(o);
+  }
+  const groupOfDiag = (n) => (DECK.groups["<diag_name>"] || {})[n] || {};
+  const loadValues = () => {
+    const g = groupOfDiag(diagSel.value);
+    fmtSel.value = g.format || "openpmd";
+    beSel.value = g.openpmd_backend || "h5";
+    intInput.value = g.intervals || "1";
+    meta.value = DECK.params["studio.hdf5_metadata"] || "";
+    status.textContent = ""; status.style.color = "var(--dim)";
+  };
+  const setDiagValues = () => {
+    const n = diagSel.value;
+    if (!n) return false;
+    const nint = Number(intInput.value);
+    if (!Number.isInteger(nint) || nint < 1) {
+      status.textContent = "输出间隔必须是 >=1 的整数"; status.style.color = "var(--err)";
+      return false;
+    }
+    DECK.groups["<diag_name>"] = DECK.groups["<diag_name>"] || {};
+    const g = DECK.groups["<diag_name>"][n] = DECK.groups["<diag_name>"][n] || {};
+    g.format = fmtSel.value;
+    g.openpmd_backend = beSel.value;
+    g.intervals = String(nint);
+    markDirty();
+    status.textContent = "已写入 Deck；点顶部保存或这里保存项目";
+    status.style.color = "var(--warn)";
+    return true;
+  };
+  diagSel.onchange = loadValues;
+  fmtSel.onchange = setDiagValues;
+  beSel.onchange = setDiagValues;
+  intInput.onchange = setDiagValues;
+  meta.oninput = () => {
+    const text = meta.value.trim();
+    if (text) DECK.params["studio.hdf5_metadata"] = text;
+    else delete DECK.params["studio.hdf5_metadata"];
+    markDirty();
+    if (!text) { status.textContent = ""; return; }
+    try { JSON.parse(text); status.textContent = "JSON 格式 OK"; status.style.color = "var(--ok)"; }
+    catch (e) { status.textContent = "JSON 格式错误: " + e.message; status.style.color = "var(--err)"; }
+  };
+  apply.onclick = async () => {
+    if (!diagSel.value) { status.textContent = "没有诊断可设置"; status.style.color = "var(--err)"; return; }
+    const text = meta.value.trim();
+    if (text) {
+      try { JSON.parse(text); }
+      catch (e) { status.textContent = "JSON 格式错误: " + e.message; status.style.color = "var(--err)"; return; }
+      DECK.params["studio.hdf5_metadata"] = text;
+    } else delete DECK.params["studio.hdf5_metadata"];
+    if (!setDiagValues()) return;
+    if (PROJECT_NAME) {
+      apply.disabled = true; status.textContent = "正在保存…"; status.style.color = "var(--dim)";
+      const ok = await saveProject(PROJECT_NAME);
+      apply.disabled = false;
+      status.textContent = ok ? "已保存；算例结束后写入 .h5" : "保存失败";
+      status.style.color = ok ? "var(--ok)" : "var(--err)";
+    } else {
+      status.textContent = "已写入 Deck；先保存项目再运行";
+      status.style.color = "var(--warn)";
+    }
+  };
+  full.onclick = () => {
+    const n = diagSel.value;
+    if (!n) { status.textContent = "没有诊断可设置"; status.style.color = "var(--err)"; return; }
+    const raw = String(DECK.params["geometry.dims"] || "2").trim().toUpperCase();
+    let fields, pvars;
+    if (raw === "1") {
+      fields = ["Ez", "Bx", "By", "jz", "rho", "divE", "divB", "part_per_cell"];
+      pvars = "z ux uy uz w";
+    } else if (raw === "RZ") {
+      fields = ["Er", "Et", "Ez", "Br", "Bt", "Bz", "jr", "jt", "jz",
+                "rho", "divE", "divB", "part_per_cell"];
+      pvars = "x z ux uy uz w";
+    } else if (raw === "3") {
+      fields = ["Ex", "Ey", "Ez", "Bx", "By", "Bz", "jx", "jy", "jz",
+                "rho", "divE", "divB", "part_per_cell"];
+      pvars = "x y z ux uy uz w";
+    } else {
+      fields = ["Ex", "Ey", "Ez", "Bx", "By", "Bz", "jx", "jy", "jz",
+                "rho", "divE", "divB", "part_per_cell"];
+      pvars = "x z ux uy uz w";
+    }
+    if (DECK.params["warpx.eb_implicit_function"]) fields.push("eb_covered");
+    const es = String(DECK.params["warpx.do_electrostatic"] || "none").trim().toLowerCase();
+    if (es && es !== "none") fields.push("phi");
+    if (String(DECK.params["algo.maxwell_solver"] || "").toLowerCase() === "hybrid") {
+      fields.push("Te", "Pe");
+    }
+    const species = String(deckGet("particles.species_names") || "").trim().split(/\s+/).filter(Boolean);
+    for (const sp of species) {
+      fields.push("rho_" + sp);
+      // RZ 的 FullDiagnostics 对 T_/part_per_cell_ 物种场有 ncomp 断言问题，
+      // 默认只加 rho_<species>；2D/3D/1D 才加全套。
+      if (raw !== "RZ") fields.push("T_" + sp, "part_per_cell_" + sp);
+    }
+    DECK.groups["<diag_name>"] = DECK.groups["<diag_name>"] || {};
+    const g = DECK.groups["<diag_name>"][n] = DECK.groups["<diag_name>"][n] || {};
+    g.format = "openpmd";
+    g.openpmd_backend = "h5";
+    g.intervals = "1";
+    g.write_species = "1";
+    g.fields_to_plot = fields.join(" ");
+    for (const sp of species) g[sp + ".variables"] = pvars;
+    fmtSel.value = "openpmd"; beSel.value = "h5"; intInput.value = "1";
+    markDirty();
+    status.textContent = "已写入全量 HDF5 设置（含粒子）；点顶部保存";
+    status.style.color = "var(--warn)";
+  };
+  loadValues();
+  return sec;
+}
+
+// 可视化输出是独立页面：切过来时隐藏参数表单，并把输入/输出文件地址显示出来
+function renderVisualization() {
+  document.getElementById("page-input").style.display = "none";
+  document.getElementById("page-vis").style.display = "";
+  renderPaths("vis-paths");
+  refreshQuantities();
+  refreshReplay();
+  refreshGallery();
+  refreshLive();
+}
+
+function renderPaths(targetId) {
+  const box = document.getElementById(targetId);
+  if (!box) return;
+  fetch("/api/paths").then(r => r.json()).then(d => {
+    if (!d || !d.workdir) { box.style.display = "none"; return; }
+    box.style.display = "";
+    const rows = [
+      ["输入文件", d.inputs],
+      ["运行目录", d.workdir],
+      ["输出目录", d.diag_dir || "（还没产生输出）"],
+    ];
+    box.innerHTML = rows.map(([k, v]) =>
+      `<div><span style="color:var(--dim);display:inline-block;width:72px">${k}</span>` +
+      `<code style="user-select:all">${v || "-"}</code></div>`).join("");
+  }).catch(() => { box.style.display = "none"; });
+}
+
+async function renderPlugins() {
+  const form = document.getElementById("form");
+  form.innerHTML = "";
+  const data = await (await fetch("/api/plugins")).json();
+  const plugins = (data && data.plugins) || [];       // 接口异常时也不能崩
+  if (!plugins.length) {
+    form.innerHTML = '<div class="warn tip">把 .py 文件放进 warpx_studio/plugins/ ' +
+      '（或 ~/.config/warpx-studio/plugins/），暴露 NAME 与 panel(context) 即可出现在这里。</div>';
+    return;
+  }
+  for (const plugin of plugins) {
+    const sec = document.createElement("section");
+    sec.className = "group";
+    const head = document.createElement("h3");
+    head.innerHTML = `<span>${plugin.name}</span><span style="color:var(--dim)">${plugin.source}</span>`;
+    const body = document.createElement("div");
+    body.className = "rows";
+    body.textContent = "加载中…";
+    if (category.note) {
+      const note = document.createElement("div");
+      note.style.cssText = ("padding:6px 10px;font-size:12px;color:var(--dim);"
+        + "border-bottom:1px solid var(--line);line-height:1.5");
+      note.innerHTML = category.note;
+      sec.append(note);
+    }
+    sec.append(head, body);
+    form.appendChild(sec);
+    fetch("/api/panel/" + plugin.id).then(r => r.json()).then(d => { body.innerHTML = d.html; });
+  }
+}
+
+// 按依赖关系排序：一个开关后面紧跟它的依赖参数，用户能顺着往下填。
+// 依赖图来自 gating_rules（dependent 的规则里 param 就是它的选择器）。
+function orderByDependency(names) {
+  const deps = {}, isDependent = new Set();
+  const inSet = new Set(names);
+  for (const n of names) {
+    for (const r0 of ((CATALOG.gating_rules || {})[n] || [])) {
+      // 规则可能是"与"组（数组）：组里每个参数都是这条依赖的选择器
+      for (const r of (Array.isArray(r0) ? r0 : [r0])) {
+        const sel = r && r.param;
+        if (!sel || !inSet.has(sel) || sel === n) continue;
+        (deps[sel] = deps[sel] || []).push(n);
+        isDependent.add(n);
+      }
+    }
+  }
+  const out = [], seen = new Set();
+  const push = (n) => {
+    if (seen.has(n)) return;
+    seen.add(n); out.push(n);
+    for (const d of (deps[n] || [])) push(d);
+  };
+  for (const n of names) if (!isDependent.has(n)) push(n);   // 先放"根"参数
+  for (const n of names) push(n);                            // 兜底：循环依赖剩下的
+  return out;
+}
+
+// 值变化会改变门控 -> 需要重新渲染表单；保留滚动位置与焦点
+let RENDER_TIMER = null;
+// 名字列表（lasers.names / collisions.collision_names / particles.species_names /
+// diagnostics.diags_names）与对应的模板实例保持同步：填了名字就自动出现该实例的参数卡片。
+function syncInstancesFromNames() {
+  const pairs = [
+    ["lasers.names", "<laser_name>"],
+    ["collisions.collision_names", "<collision_name>"],
+    ["particles.species_names", "<species_name>"],
+    ["diagnostics.diags_names", "<diag_name>"],
+    ["warpx.reduced_diags_names", "<reduced_diags_name>"],
+  ];
+  let changed = false;
+  for (const [listName, template] of pairs) {
+    const raw = String(deckGet(listName) || "").trim();
+    if (!raw) continue;
+    const names = raw.split(/\s+/).filter(Boolean);
+    const key = TEMPLATE_ALIAS[template] || template;
+    DECK.groups[key] = DECK.groups[key] || {};
+    for (const n of names) {
+      if (!DECK.groups[key][n]) { DECK.groups[key][n] = {}; changed = true; }
+    }
+  }
+  return changed;
+}
+
+function scheduleFormRender() {
+  clearTimeout(RENDER_TIMER);
+  RENDER_TIMER = setTimeout(() => {
+    const main = document.querySelector("main");
+    const top = main ? main.scrollTop : 0;
+    syncInstancesFromNames();
+    render();
+    if (main) main.scrollTop = top;
+    markIssues(LAST_ISSUES.filter(i => i.severity === "error"));
+  }, 120);
+}
+
+// ---- 输入文本 <-> 表单 双向同步 -----------------------------------------
+// 用户既能手写 inputs，也能用表单填空；两边改完互相回写。为避免互相触发死循环，
+// 用 TEXT_LOCK 标记"这次变化是从文本来的"。
+let TEXT_LOCK = false, TEXT_TIMER = null;
+
+function setTextStatus(msg, color) {
+  const el = document.getElementById("text-status");
+  if (el) { el.textContent = msg; el.style.color = color || "var(--dim)"; }
+}
+
+function formToText() {
+  const ta = document.getElementById("inputs-text");
+  if (!ta || TEXT_LOCK) { return; }
+  fetch("/api/preview", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ params: DECK.params, groups: DECK.groups }),
+  }).then(r => r.json()).then(d => {
+    if (typeof d.inputs === "string") {
+      if (ta.value !== d.inputs) {
+        const pos = ta.selectionStart;
+        ta.value = d.inputs;
+        ta.selectionStart = ta.selectionEnd = Math.min(pos, ta.value.length);
+      }
+      SAVED_TEXT = d.inputs;
+      TEXT_AHEAD = true;                 // 这份文本就是当前表单的完整表达
+      setTextStatus("已同步（表单 → 文本）", "var(--ok)");
+    }
+  }).catch(() => setTextStatus("同步失败", "var(--err)"));
+}
+
+function textToForm() {
+  const ta = document.getElementById("inputs-text");
+  if (!ta) { return; }
+  TEXT_LOCK = true;
+  fetch("/api/parse", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: ta.value }),
+  }).then(async r => {
+    const d = await r.json();
+    if (!r.ok) {
+      const detail = typeof d.detail === "string" ? d.detail : JSON.stringify(d.detail || "");
+      setTextStatus("解析失败: " + String(detail).slice(0, 80), "var(--err)");
+      return;
+    }
+    DECK.params = d.deck.params || {};
+    DECK.groups = d.deck.groups || {};
+    const main = document.querySelector("main");
+    const top = main ? main.scrollTop : 0;
+    syncInstancesFromNames();
+    try {
+      render();
+    } catch (err) {
+      // 表单渲染出错不等于文本解析失败，分开提示，免得误导
+      setTextStatus("文本已解析，但表单渲染出错: " + String((err && err.message) || err).slice(0, 70),
+                    "var(--err)");
+      return;
+    }
+    if (main) main.scrollTop = top;
+    SAVED_TEXT = ta.value;                       // 记住用户原文
+    TEXT_AHEAD = true;                           // 文本已解析回表单，两边现在是同一份
+    if (PROJECT_NAME) {                          // 已打开任务：顺手写进项目文件
+      saveProject(PROJECT_NAME).catch(() => {});
+    }
+    const nSpecies = Object.keys(d.deck.groups["<species_name>"] || {}).length;
+    const nDiags = Object.keys(d.deck.groups["<diag_name>"] || {}).length;
+    setTextStatus(`已保存：${d.params} 个顶层参数、${nSpecies} 个物种、${nDiags} 个诊断`, "var(--ok)");
+  }).catch(() => setTextStatus("解析失败", "var(--err)"))
+    .finally(() => { TEXT_LOCK = false; });
+}
+
+// Maxwellian 的 u_std 与 temperature_in_eV 是源码里互斥的两支。表单只隐藏参数
+// 不会删值，旧值仍会被序列化 → WarpX assert。切换子类型时清掉另一支。
+const MW_USTD_KEYS = ["ux_std", "uy_std", "uz_std",
+  "ux_std_function(x,y,z)", "uy_std_function(x,y,z)", "uz_std_function(x,y,z)",
+  "read_u_std_from_path"];
+const MW_TEMP_KEYS = ["temperature_in_eV", "temperature_in_eV_function(x,y,z)",
+  "read_temperature_in_eV_from_path", "temperature_in_eV_mesh_name"];
+function clearKeys(obj, keys) { for (const k of keys) delete obj[k]; }
+
+function renderTemplateCards(template, params, body) {
+  // 源码里 <species> 与 <species_name> 是同一个命名空间，统一成后者
+  const key = TEMPLATE_ALIAS[template] || template;
+  const instances = DECK.groups[key] = DECK.groups[key] || {};
+  for (const [inst, values] of Object.entries(instances)) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.style.cssText = "border:1px solid var(--acc);border-radius:8px;padding:10px;margin:14px 0 18px;"
+                       + "background:rgba(255,255,255,0.02)";
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:6px;align-items:center;margin-bottom:6px";
+    const title = document.createElement("input");
+    title.value = inst;
+    title.style.cssText = "background:#0f1116;color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 6px";
+    title.onchange = () => {
+      if (!title.value || title.value === inst) return;
+      DECK.groups[key][title.value] = DECK.groups[key][inst];
+      delete DECK.groups[key][inst];
+      render();
+    };
+    const del = document.createElement("button");
+    del.textContent = "× 删除";
+    del.onclick = () => { delete instances[inst]; render(); };
+    bar.append(document.createTextNode(template.replace(/[<>]/g, "")), title, del);
+    card.appendChild(bar);
+    for (const full of orderByDependency(params)) {
+      // 同一张卡片里可能混着 <species>.x 与 <species_name>.x 两种前缀，
+      // 必须按"这一行自己的前缀"截断，否则会算出 ame>.injection_style 这种坏键，
+      // 值写进去后门控读不到（表现为"选了选项参数不出现"）。
+      const sub = full.slice(full.indexOf(">") + 2);
+      if (!visible(full, inst)) continue;
+      card.appendChild(inputRow(full, values[sub],
+        v => {
+          const group = DECK.groups[key][inst] = DECK.groups[key][inst] || {};
+          group[sub] = v;
+          if (v) {
+            if (sub === "maxwellian_u_std_distribution_type") {
+              delete group["maxwellian_temperature_in_eV_distribution_type"];
+              clearKeys(group, MW_TEMP_KEYS);
+            } else if (sub === "maxwellian_temperature_in_eV_distribution_type") {
+              delete group["maxwellian_u_std_distribution_type"];
+              clearKeys(group, MW_USTD_KEYS);
+            }
+          }
+        }, inst));
+    }
+    body.appendChild(card);
+  }
+  const add = document.createElement("button");
+  add.textContent = `+ 新增一张 ${(ZH.sections[key] || key)}`;
+  add.onclick = () => {
+    const base = TEMPLATE_BASE[key] || "item";
+    let n = 1; while (DECK.groups[key][base + n]) n++;
+    // 新组分默认继承"上一个组分"的全部取值，用户只需要改差异项
+    const prev = Object.values(instances).pop();
+    DECK.groups[key][base + n] = prev ? JSON.parse(JSON.stringify(prev)) : {};
+    render();
+  };
+  body.appendChild(add);
+}
+
+function render() {
+  if (STEP === 5) { renderPlugins(); return; }
+  if (STEP === 6) { renderBuild(); return; }
+  if (STEP === 7) { renderVisualization(); return; }
+  document.getElementById("page-input").style.display = "";
+  document.getElementById("page-vis").style.display = "none";
+  renderPaths("paths");
+  const form = document.getElementById("form");
+  form.innerHTML = "";
+  const wanted = STEP_CATEGORIES[STEP];
+  const categories = CATALOG_CATEGORIES.length
+    ? CATALOG_CATEGORIES
+    : [{ id: "all", name: "全部参数", params: CATALOG.params.map(p => p.name) }];
+  for (const category of categories) {
+    if (wanted && !wanted.includes(category.id)) continue;
+    const names = category.params.filter(n => PARAM_BY_NAME[n]);
+    if (!names.length) continue;
+    const sec = document.createElement("section");
+    sec.className = "group";
+    const head = document.createElement("h3");
+    head.innerHTML = `<span>${category.name}</span><span style="color:var(--dim)">${names.length} 项</span>`;
+    const body = document.createElement("div");
+    body.className = "rows";
+    head.onclick = () => { body.style.display = body.style.display === "none" ? "" : "none"; };
+    sec.append(head, body);
+
+    const byTemplate = new Map();
+    for (const name of names.filter(n => n.startsWith("<"))) {
+      const raw = name.split(">")[0] + ">";
+      const key = TEMPLATE_ALIAS[raw] || raw;
+      if (!byTemplate.has(key)) byTemplate.set(key, { prefix: raw, params: [] });
+      byTemplate.get(key).params.push(name);
+    }
+    for (const [key, entry] of byTemplate) {
+      renderTemplateCards(entry.prefix, entry.params, body);
+    }
+    // 默认只渲染"常用"参数，其余折叠在一个按钮后面：351 项全铺开会非常长
+    const plain = names.filter(n => !n.startsWith("<") && visible(n));
+    const ordered = orderByDependency(plain);
+    // 开关在"常用"里时，它的依赖参数也提到常用里，否则会散落在折叠区
+    const promoted = new Set(ordered.filter(n => PARAM_BY_NAME[n] && PARAM_BY_NAME[n].core));
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const n of ordered) {
+        if (promoted.has(n)) continue;
+        const rs = (CATALOG.gating_rules || {})[n] || [];
+        const sels = [];
+        for (const r0 of rs) {
+          for (const r of (Array.isArray(r0) ? r0 : [r0])) if (r && r.param) sels.push(r.param);
+        }
+        if (sels.some((sel) => promoted.has(sel))) { promoted.add(n); grew = true; }
+      }
+    }
+    const coreNames = ordered.filter(n => promoted.has(n));
+    const restNames = ordered.filter(n => !promoted.has(n));
+    for (const name of coreNames) {
+      body.appendChild(inputRow(name, DECK.params[name], v => { DECK.params[name] = v; }));
+    }
+    if (restNames.length) {
+      const more = document.createElement("div");
+      more.className = "rows";
+      more.style.display = "none";
+      for (const name of restNames) {
+        more.appendChild(inputRow(name, DECK.params[name], v => { DECK.params[name] = v; }));
+      }
+      const toggle = document.createElement("button");
+      toggle.textContent = `展开其余 ${restNames.length} 项`;
+      toggle.style.cssText = "margin:6px 8px;font-size:12px";
+      toggle.onclick = () => {
+        const open = more.style.display !== "none";
+        more.style.display = open ? "none" : "";
+        toggle.textContent = open ? `展开其余 ${restNames.length} 项` : "收起";
+      };
+      body.append(more, toggle);
+    }
+    form.appendChild(sec);
+  }
+  if (STEP === 4) form.appendChild(buildHdf5Module());
+  validate();
+}
+
+let VALIDATE_TIMER = null, LAST_ISSUES = [];
+function scheduleValidate() {
+  clearTimeout(VALIDATE_TIMER);
+  VALIDATE_TIMER = setTimeout(runValidation, 350);
+}
+async function runValidation() {
+  if (!VALIDATION_ON) {
+    LAST_ISSUES = [];
+    markIssues([]);
+    document.getElementById("warn").innerHTML = "";
+    document.getElementById("run").disabled = false;
+    return;
+  }
+  try {
+    const r = await fetch("/api/validate", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(DECK) });
+    const data = await r.json();
+    LAST_ISSUES = data.issues || [];
+    const errors = LAST_ISSUES.filter(i => i.severity === "error");
+    const warn = document.getElementById("warn");
+    warn.innerHTML = LAST_ISSUES.filter(i => i.severity !== "info")
+      .map(i => `<div class="warn ${i.severity === "error" ? "bad" : "tip"}"><b>${i.param}</b> — ${i.message}` +
+                (i.options && i.options.length ? `（可选值: ${i.options.join(" / ")}）` : "") + `</div>`)
+      .join("");
+    document.getElementById("run").disabled = errors.length > 0;
+    markIssues(errors);
+  } catch (e) { /* offline */ }
+}
+
+// 把校验错误映射到"第几步 / 哪个分类 / 哪一行"，否则参数一多根本找不到
+// 把校验给的参数名（可能是实例级，如 ions.density）归一到模板级
+// （<species_name>.density），并找到它所属的分类。
+const TEMPLATE_OF_INSTANCE = () => {
+  const map = new Map();
+  for (const [tpl, insts] of Object.entries(DECK.groups || {})) {
+    const key = TEMPLATE_ALIAS[tpl] || tpl;
+    for (const inst of Object.keys(insts || {})) { map.set(inst, key); }
+  }
+  return map;
+};
+
+function normalizeParamName(name) {
+  const raw = String(name || "");
+  if (raw.startsWith("<")) { return raw; }
+  const head = raw.split(".")[0];
+  const tpl = TEMPLATE_OF_INSTANCE().get(head);
+  if (!tpl) { return raw; }
+  return tpl + raw.slice(head.length);
+}
+
+function categoryOfParam(name) {
+  const norm = normalizeParamName(name);
+  const cats = CATALOG_CATEGORIES || [];
+  // 1) 精确命中
+  for (const c of cats) { if (c.params.includes(norm)) return c.id; }
+  // 2) 模板命中的再按"同一模板"归入同一分类
+  if (norm.startsWith("<")) {
+    for (const c of cats) {
+      if (c.params.some(p => p.split(">")[0] === norm.split(">")[0])) return c.id;
+    }
+  }
+  // 3) 退化为前缀（例如 diag1.intervals -> <diag_name>.intervals）
+  const head = String(name).split(".")[0];
+  for (const c of cats) {
+    if (c.params.some(p => p.startsWith(head + "."))) return c.id;
+  }
+  return null;
+}
+
+function stepOfCategory(cid) {
+  for (const [step, cats] of Object.entries(STEP_CATEGORIES || {})) {
+    if (cats.includes(cid)) return Number(step);
+  }
+  return null;
+}
+
+function markIssues(errors) {
+  ERR_PARAMS = new Set((errors || []).map(i => i.param));
+  ERR_STEPS = new Map();
+  for (const issue of (errors || [])) {
+    const cid = categoryOfParam(issue.param);
+    const step = cid ? stepOfCategory(cid) : null;
+    if (step) { ERR_STEPS.set(step, (ERR_STEPS.get(step) || 0) + 1); }
+  }
+  paintNavErrors();
+  // 只改样式，不重画表单：重画会再次触发校验，形成 render→validate→render 的循环。
+  // 已经渲染出来的行直接加/去 err；下次渲染时 inputRow 也会自动带上。
+  document.querySelectorAll(".row").forEach(row => {
+    const name = row.dataset ? row.dataset.param : null;
+    if (!name) { return; }
+    // 必须用 rowHasError：模板行是 <species_name>.density，报错给的是 ions.density，
+    // 直接查集合会把已经标红的行又抹掉（用户看到侧边栏红了、行不红就是这个原因）。
+    const inst = row.dataset ? row.dataset.instance : null;
+    if (rowHasError(name, inst)) { row.classList.add("err"); }
+    else { row.classList.remove("err"); }
+  });
+  document.querySelectorAll("section.group").forEach(sec => {
+    if (sec.querySelector && sec.querySelector(".row.err")) { sec.classList.add("err"); }
+    else { sec.classList.remove("err"); }
+  });
+}
+
+function paintNavErrors() {
+  const nav = document.querySelectorAll ? document.querySelectorAll("nav button") : [];
+  for (const btn of nav) {
+    btn.classList.remove("err");
+    const old = btn.querySelector ? btn.querySelector(".badge") : null;
+    if (old && old.remove) { old.remove(); }
+    const step = Number(btn.dataset ? btn.dataset.step : btn.getAttribute("data-step"));
+    const n = ERR_STEPS.get(step);
+    if (!n) { continue; }
+    btn.classList.add("err");
+    if (btn.appendChild && document.createElement) {
+      const span = document.createElement("span");
+      span.className = "badge";
+      span.textContent = String(n);
+      btn.appendChild(span);
+    }
+  }
+}
+
+function validate() {
+  const warn = document.getElementById("warn");
+  const msgs = [];
+  const diags = DECK.groups["<diag_name>"] || {};
+  for (const [name, values] of Object.entries(diags)) {
+    if ((values.format || "").toLowerCase() === "openpmd" && !values.intervals && !values.period)
+      msgs.push({ tip: `${name}: format=openpmd 但没有设置 intervals，实时图不会随计算更新。` });
+  }
+  const ncell = (DECK.params["amr.n_cell"] || "").trim().split(/\s+/).map(Number);
+  const cells = ncell.filter(n => n > 0).reduce((a, b) => a * b, 1);
+  if (cells > 4_000_000) msgs.push({ bad: `网格 ${cells.toLocaleString()} 个点，内存可能很大（先小网格跑通）。` });
+  if (!DECK.params["max_step"] && !DECK.params["stop_time"])
+    msgs.push({ tip: "没有设置 max_step 或 stop_time，仿真会一直跑。" });
+  if (msgs.length) {
+    warn.innerHTML = msgs.map(m => `<div class="warn ${m.bad ? "bad" : "tip"}">${m.bad || m.tip}</div>`).join("");
+  }
+  scheduleValidate();
+}
+
+async function loadStarter() {
+  const starter = await (await fetch("/api/starter")).json();
+  DECK.params = starter.params;
+  DECK.groups = starter.groups;
+}
+
+function setStatus(text, colour) {
+  document.getElementById("status").innerHTML =
+    `<span class="dot" style="background:${colour}"></span>${text}`;
+}
+
+let POLLING = false, POLL_TIMER = null;
+async function poll() {
+  // 防止多个轮询循环叠在一起：init、启动成功、409 都会调用 poll。
+  // 每次进入先取消已排队的定时器；仍在进行中的那次会在结束后重新排一个。
+  if (POLL_TIMER) { clearTimeout(POLL_TIMER); POLL_TIMER = null; }
+  if (POLLING) return;
+  POLLING = true;
+  try {
+    const s = await (await fetch("/api/status")).json();
+    if (s.state === "idle") return;
+    const running = s.state === "running", paused = s.state === "paused";
+    document.getElementById("run").disabled = running || paused;
+    document.getElementById("stop").disabled = !(running || paused);
+    document.getElementById("pause").disabled = !running;
+    document.getElementById("resume").disabled = !paused;
+    const max = s.max_step ? `/${s.max_step}` : "";
+    const pct = s.max_step ? Math.min(100, 100 * s.step / s.max_step) : 0;
+    setStatus(`${s.state} · step ${s.step}${max} · t=${s.time.toExponential(2)} s · ${s.elapsed}s`,
+      running ? "var(--ok)" : paused ? "var(--warn)" : s.state === "finished" ? "var(--acc)" : "var(--err)");
+    const bar = document.getElementById("pbar");
+    document.getElementById("log").textContent = (s.log || []).join("\n");
+    if (s.errors && s.errors.length) {
+      const d = (s.diagnosis && s.diagnosis[0]) || null;
+      setStatus(d && d.param ? `失败: ${d.param} — ${(d.hint || d.message).slice(0, 80)}`
+                             : `失败: ${s.errors[0].slice(0, 80)}`, "var(--err)");
+    }
+    const live = s.live || {};
+    document.getElementById("meta").textContent = live.meta && live.meta.summary
+      ? live.meta.summary + (live.meta.ok ? "" : "（渲染失败）") : "等待第一个输出迭代…";
+    if (live.frames && live.frames.length) {
+      const grid = document.getElementById("livegrid");
+      if (grid.childElementCount !== live.frames.length) {
+        grid.innerHTML = live.frames.map(f => `<img alt="${f.field}" style="width:100%;background:#000">`).join("");
+      }
+      live.frames.forEach((f, i) => {
+        const img = grid.children[i];
+        if (img && f.png) img.src = "/api/frame?field=" + encodeURIComponent(f.field) + "&t=" + Date.now();
+      });
+    }
+  } catch (e) { /* keep polling */ }
+  finally { POLLING = false; }
+  POLL_TIMER = setTimeout(poll, 1200);
+}
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+  b.classList.add("active"); STEP = Number(b.dataset.step); render();
+  if (STEP === 5) setInterval(() => { if (STEP === 5) renderPlugins(); }, 3000);
+});
+document.getElementById("run").onclick = async () => {
+  // 运行前先同步校验一次：之前依赖后台防抖校验，用户手快时会在校验结果回来之前
+  // 就把缺 geometry.prob_lo 的算例发出去，WarpX 起跑三秒后才 abort。
+  if (VALIDATION_ON) try {
+    const vr = await fetch("/api/validate", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(DECK) });
+    const vd = await vr.json();
+    const errs = (vd.issues || []).filter(i => i.severity === "error");
+    LAST_ISSUES = vd.issues || [];
+    markIssues(errs);
+    if (errs.length) {
+      const names = errs.slice(0, 4).map(i => i.param).join("、");
+      setStatus(`有 ${errs.length} 个错误，先按侧边栏红标补齐（${names}${errs.length > 4 ? " …" : ""}）`,
+                "var(--err)");
+      return;
+    }
+  } catch (e) { /* 离线时照旧尝试运行 */ }
+  const sel = document.getElementById("binary");
+  const ta = document.getElementById("inputs-text");
+  if (!sel.value) {
+    setStatus("没有选择可执行文件（当前维度没有可用二进制，先在第 6 步构建）", "var(--err)");
+    return;
+  }
+  // 只有文本确实比表单新时才发原文；否则发 deck。旧写法只要 SAVED_TEXT 非空
+  // 就永远优先发文本，导致"换项目 / 改表单后结果不变"。
+  const text = TEXT_AHEAD ? ((ta && ta.value) || SAVED_TEXT || "") : "";
+  const body = { ...DECK, binary: sel.value, project: PROJECT_NAME || null,
+    inputs_text: text.trim() ? text : null,
+    validate: VALIDATION_ON, force: !VALIDATION_ON,   // 校验关着就不要拦运行
+    mpi: Number(document.getElementById("mpi").value) || 1,
+    omp: Number(document.getElementById("omp").value) || 1,
+    live_field: document.getElementById("livefield").value || null,
+    live_component: document.getElementById("livecomp").value || null };
+  const r = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) });
+  const out = await r.json();
+  if (!r.ok) {
+    if (r.status === 409) {
+      // 后端同一时间只允许一个仿真；把"还有任务在跑"翻译成人话，并显示进度。
+      let extra = "";
+      try {
+        const s = await (await fetch("/api/status")).json();
+        if (s.max_step) extra = `（当前 step ${s.step}/${s.max_step}）`;
+        else if (s.step) extra = `（当前 step ${s.step}）`;
+      } catch (e) { /* ignore */ }
+      setStatus(`已有算例在运行${extra}：先点「停止」或等它结束，再运行新算例`, "var(--err)");
+      poll();          // 同步按钮状态（运行中时「运行」应禁用）
+      return;
+    }
+    setStatus(out.detail || "启动失败", "var(--err)");
+    return;
+  }
+  setStatus("已启动 · " + out.run_dir, "var(--ok)"); poll();
+};
+document.getElementById("stop").onclick = () => fetch("/api/stop", { method: "POST" });
+document.getElementById("pause").onclick = () => fetch("/api/pause", { method: "POST" });
+document.getElementById("resume").onclick = () => fetch("/api/resume", { method: "POST" });
+document.getElementById("paraview-close").onclick = async () => {
+  const r = await fetch("/api/paraview/close-all", { method: "POST" });
+  const out = await r.json();
+  setStatus(out.remaining === "0" ? "已关闭所有 ParaView" : `仍有 ${out.remaining} 个 ParaView 进程`,
+            out.remaining === "0" ? "var(--ok)" : "var(--warn)");
+  document.getElementById("paraview-close").style.display = "none";
+};
+document.getElementById("paraview").onclick = () => {
+  document.getElementById("replay").scrollIntoView({ behavior: "smooth", block: "start" });
+  refreshQuantities(); refreshReplay(); refreshGallery();
+  setStatus("已在网页内打开交互查看器：拖动旋转、滚轮缩放、进度条回放", "var(--ok)");
+};
+// 外部 ParaView 入口已移除（会弹窗且关不掉）；需要看图请用网页内查看器
+async function refreshCheckpoints() {
+  const data = await (await fetch("/api/checkpoints")).json();
+  const sel = document.getElementById("checkpoint");
+  const current = sel.value;
+  sel.innerHTML = '<option value="">（无 checkpoint）</option>';
+  for (const c of data.checkpoints || []) {
+    const o = document.createElement("option");
+    o.value = c.path; o.textContent = `${c.run}/${c.name}`;
+    sel.appendChild(o);
+  }
+  if (current) sel.value = current;
+}
+document.getElementById("restart").onclick = () => {
+  const value = document.getElementById("checkpoint").value;
+  if (!value) { setStatus("先选一个 checkpoint", "var(--warn)"); return; }
+  DECK.params["amr.restart"] = value;
+  render();
+  document.getElementById("run").click();
+};
+// ---- 回放与图片：拖动进度条看任意时刻的画面，可保存/删除 -------------------
+let RP_ITERS = [], RP_INDEX = 0, RP_TIMER = null, RP_LOADED = false;
+let RP_QUANTITIES = [];
+
+const QUANTITY_LABEL = {
+  rho: "电荷密度 rho（标量）",
+  E: "电场 E（矢量）",
+  B: "磁场 B（矢量）",
+  j: "电流密度 j（矢量）",
+};
+const AXIS_LABEL = {
+  x: "x", y: "y", z: "z",
+  r: "径向 r", t: "角向 θ",
+};
+function componentLabel(c) {
+  const axis = c.axis || c.name;
+  return AXIS_LABEL[axis] || axis;
+}
+function quantityLabel(q) {
+  const base = QUANTITY_LABEL[q.name] || q.name;
+  if (q.ncomp > 1 && (q.components || []).some(c => (c.axis || c.name) === "t")) {
+    return base + "（θ,r,z）";
+  }
+  return base;
+}
+
+// 物理量直接从输出里枚举：标量（如 rho）没有分量，不显示分量下拉。
+function fillQuantitySelect() {
+  const field = document.getElementById("rp-field");
+  const comp = document.getElementById("rp-comp");
+  const compLabel = document.getElementById("rp-comp-label");
+  const previous = field.value;
+  field.innerHTML = "";
+  for (const q of RP_QUANTITIES) {
+    const o = document.createElement("option");
+    o.value = q.name;
+    o.textContent = quantityLabel(q);
+    field.appendChild(o);
+  }
+  if (previous && RP_QUANTITIES.some(q => q.name === previous)) field.value = previous;
+  refreshComponentSelect();
+}
+function currentQuantity() {
+  return RP_QUANTITIES.find(q => q.name === document.getElementById("rp-field").value) || null;
+}
+function refreshComponentSelect() {
+  const q = currentQuantity();
+  const comp = document.getElementById("rp-comp");
+  const label = document.getElementById("rp-comp-label");
+  comp.innerHTML = "";
+  if (!q || q.ncomp <= 1) {
+    // 标量：没有分量可选，直接隐藏这一栏（电荷密度就是这种情况）
+    label.style.display = "none";
+    comp.value = "";
+    return;
+  }
+  label.style.display = "";
+  const mod = document.createElement("option");
+  mod.value = ""; mod.textContent = "模 |F|";
+  comp.appendChild(mod);
+  // RZ: show angular, radial, z in the user's requested order.
+  const comps = [...q.components];
+  const isCyl = comps.some(c => (c.axis || c.name) === "t");
+  if (isCyl) {
+    const rank = { t: 0, r: 1, z: 2 };
+    comps.sort((a, b) => (rank[a.axis || a.name] ?? 9) - (rank[b.axis || b.name] ?? 9));
+  }
+  for (const c of comps) {
+    const o = document.createElement("option");
+    o.value = c.axis || c.name;
+    o.textContent = componentLabel(c);
+    comp.appendChild(o);
+  }
+}
+async function refreshQuantities() {
+  try {
+    const data = await (await fetch("/api/quantities")).json();
+    const items = data.quantities || [];
+    if (JSON.stringify(items) === JSON.stringify(RP_QUANTITIES)) return;
+    RP_QUANTITIES = items;
+    fillQuantitySelect();
+  } catch (e) { /* no run yet */ }
+}
+
+function rpQuery() {
+  const field = document.getElementById("rp-field").value;
+  const q = currentQuantity();
+  const comp = (q && q.ncomp > 1) ? document.getElementById("rp-comp").value : "";
+  // Use a species that actually exists in this project, not a hard-coded "electrons".
+  let parts = [];
+  if (document.getElementById("rp-particles").checked) {
+    const names = String(DECK.params["particles.species_names"] || "")
+      .trim().split(/\s+/).filter(Boolean);
+    parts = names.length ? [names[0]] : [];
+  }
+  return { field, comp, parts };
+}
+function rpFrameUrl(iteration) {
+  const { field, comp, parts } = rpQuery();
+  const params = new URLSearchParams({ field, iteration: String(iteration) });
+  if (comp) params.set("component", comp);
+  if (parts.length) params.set("particles", parts.join(","));
+  params.set("t", String(Date.now()));
+  return "/api/frame?" + params.toString();
+}
+
+function rpShow(skipRender) {
+  const iter = RP_ITERS[RP_INDEX];
+  document.getElementById("rp-iter").textContent = iter === undefined ? "—" : "迭代 " + iter;
+  document.getElementById("rp-count").textContent = RP_ITERS.length
+    ? (RP_INDEX + 1) + " / " + RP_ITERS.length : "—";
+  if (skipRender || iter === undefined) return;
+  const img = document.getElementById("rp-image");
+  img.style.display = "";
+  document.getElementById("rp-empty").style.display = "none";
+  img.src = rpFrameUrl(iter);
+}
+function rpSchedule() {
+  clearTimeout(RP_TIMER);
+  RP_TIMER = setTimeout(() => { rpShow(false); refreshGallery(); }, 180);
+}
+async function refreshReplay() {
+  try {
+    const data = await (await fetch("/api/live/iterations")).json();
+    const iters = data.iterations || [];
+    if (!iters.length) return;
+    const slider = document.getElementById("rp-slider");
+    if (!RP_LOADED || iters.length !== RP_ITERS.length) {
+      RP_ITERS = iters;
+      slider.min = "0";
+      slider.max = String(iters.length - 1);
+      RP_INDEX = iters.length - 1;
+      slider.value = String(RP_INDEX);
+      RP_LOADED = true;
+      rpShow(false);
+    } else {
+      RP_ITERS = iters;
+    }
+  } catch (e) { /* no run yet */ }
+}
+async function refreshGallery() {
+  const box = document.getElementById("rp-gallery");
+  let list = [];
+  try { list = (await (await fetch("/api/snapshots")).json()).snapshots || []; } catch (e) { return; }
+  box.innerHTML = "";
+  for (const snap of list) {
+    const card = document.createElement("figure");
+    card.style.cssText = "margin:0;position:relative";
+    const img = document.createElement("img");
+    img.src = "/api/snapshot/" + encodeURIComponent(snap.stem) + "?t=" + Date.now();
+    img.title = `${snap.field}${snap.component ? "[" + snap.component + "]" : ""} @ iter ${snap.iteration}`;
+    img.style.cssText = "width:100%;border:1px solid var(--line);border-radius:4px;background:#000";
+    const cap = document.createElement("figcaption");
+    cap.textContent = `${snap.name}（${snap.field}${snap.component || ""} @ ${snap.iteration ?? "最新"}）`;
+    cap.style.cssText = "font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis";
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.title = "删除这张图片";
+    del.style.cssText = "position:absolute;top:2px;right:2px;padding:0 5px;line-height:1.4";
+    del.onclick = async () => {
+      if (!confirm("删除图片 " + snap.name + " ？")) return;
+      await fetch("/api/snapshot/" + encodeURIComponent(snap.stem), { method: "DELETE" });
+      refreshGallery();
+    };
+    card.append(img, cap, del);
+    box.appendChild(card);
+  }
+}
+document.getElementById("rp-slider").oninput = (e) => {
+  RP_INDEX = Number(e.target.value);
+  rpShow(true);
+  rpSchedule();
+};
+document.getElementById("rp-field").onchange = () => { refreshComponentSelect(); rpShow(false); };
+for (const id of ["rp-comp", "rp-particles"]) {
+  document.getElementById(id).onchange = () => { rpShow(false); };
+}
+document.getElementById("rp-save").onclick = async () => {
+  const iter = RP_ITERS[RP_INDEX];
+  if (iter === undefined) { setStatus("还没有可保存的画面", "var(--warn)"); return; }
+  const { field, comp, parts } = rpQuery();
+  let name = document.getElementById("rp-name").value.trim();
+  if (!name) name = `${field}${comp || ""}_iter${iter}`;
+  const body = { name, iteration: iter, field, component: comp || null,
+                 particles: parts };
+  const r = await fetch("/api/snapshots", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const out = await r.json();
+  if (!r.ok) { setStatus("保存失败: " + (out.detail || ""), "var(--err)"); return; }
+  document.getElementById("rp-name").value = "";
+  refreshGallery();
+  setStatus("已保存图片：" + name, "var(--ok)");
+};
+
+async function refreshIterations() {
+  try {
+    const data = await (await fetch("/api/live/iterations")).json();
+    const select = document.getElementById("liveiter");
+    const current = select.value;
+    select.innerHTML = '<option value="">跟随最新</option>';
+    for (const n of data.iterations.slice(-60)) {
+      const o = document.createElement("option"); o.value = n; o.textContent = "iter " + n;
+      select.appendChild(o);
+    }
+    if (current) select.value = current;
+  } catch (e) { /* no run yet */ }
+}
+document.getElementById("show-derived").onchange = (e) => {
+  SHOW_DERIVED = e.target.checked;
+  render();
+};
+document.getElementById("project").onchange = async (e) => {
+  const name = e.target.value;
+  const previous = PROJECT_NAME;
+  if (!name) { PROJECT_NAME = ""; markDirty(); return; }
+  if (DIRTY && !confirm("当前改动尚未保存，仍要切换到 " + name + " 吗？")) {
+    e.target.value = PROJECT_NAME; return;
+  }
+  // 打开失败（项目不存在 / 读取错误）时把下拉框退回上一个项目，
+  // 而不是留着一个其实没打开的名字。
+  if (!(await loadProject(name))) e.target.value = previous || "";
+};
+document.getElementById("project-new").onclick = async () => {
+  const name = prompt("新任务名称：", "任务-" + new Date().toISOString().slice(5, 16).replace("T", " "));
+  if (!name) return;
+  const starter = await (await fetch("/api/starter?dims=" + document.getElementById("dims").value)).json();
+  DECK.params = starter.params; DECK.groups = starter.groups;
+  PROJECT_NAME = name;
+  SAVED_TEXT = null; TEXT_AHEAD = false;
+  const ta = document.getElementById("inputs-text");
+  if (ta) ta.value = "";
+  render();
+  await saveProject(name);
+};
+document.getElementById("project-save").onclick = async () => {
+  let name = PROJECT_NAME || document.getElementById("project").value;
+  if (!name) { name = prompt("保存为任务名："); if (!name) return; }
+  await saveProject(name);
+};
+document.getElementById("project-saveas").onclick = async () => {
+  const name = prompt("另存为：", (PROJECT_NAME || "任务") + "-副本");
+  if (name) await saveProject(name);
+};
+document.getElementById("project-clear-outputs").onclick = async () => {
+  const name = PROJECT_NAME || document.getElementById("project").value;
+  if (!name) { setStatus("先打开或保存一个项目", "var(--warn)"); return; }
+  if (!confirm("删除项目“" + name + "”的全部输出文件？\n\n项目定义、参数、inputs 会保留；只删除 audit_runs/studio 下的运行目录。")) return;
+  const r = await fetch("/api/project-outputs/" + encodeURIComponent(name), { method: "DELETE" });
+  let out = {};
+  try { out = await r.json(); } catch (e) {}
+  if (!r.ok) {
+    setStatus("删除输出失败：" + (out.detail || ("HTTP " + r.status)), "var(--err)");
+    return;
+  }
+  const gb = (Number(out.bytes || 0) / 1e9).toFixed(2);
+  setStatus(`已删除 ${out.deleted} 个输出目录（${gb} GB）` +
+            (out.missing ? `，${out.missing} 个目录已不存在` : "") +
+            "；项目定义和 inputs 保留", "var(--warn)");
+  await refreshProjects(name);
+  if (document.body.classList.contains("text-mode") && SAVED_TEXT !== null) {
+    document.getElementById("inputs-text").value = SAVED_TEXT;
+  }
+  refreshLive();
+};
+document.getElementById("project-delete").onclick = async () => {
+  const name = PROJECT_NAME || document.getElementById("project").value;
+  if (!name || !confirm("确定删除任务 " + name + " ？")) return;
+  const r = await fetch("/api/projects/" + encodeURIComponent(name), { method: "DELETE" });
+  if (!r.ok) { setStatus("删除失败", "var(--err)"); return; }
+  PROJECT_NAME = ""; SAVED_TEXT = null; TEXT_AHEAD = false;
+  const ta = document.getElementById("inputs-text");
+  if (ta) ta.value = "";
+  await refreshProjects(); markDirty();
+  setStatus("已删除：" + name, "var(--warn)");
+};
+document.getElementById("liveapply").onclick = async () => {
+  const fields = [...document.querySelectorAll(".livefield:checked")].map(x => x.value);
+  const particles = document.getElementById("liveparticles").checked ? ["electrons"] : [];
+  const raw = document.getElementById("liveiter").value;
+  const body = { fields, particles, follow: raw === "" };
+  if (raw !== "") body.iteration = Number(raw);
+  const r = await fetch("/api/live", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) });
+  setStatus(r.ok ? "实时视图已更新" : "更新失败", r.ok ? "var(--ok)" : "var(--err)");
+};
+document.getElementById("export").onclick = async () => {
+  setStatus("正在导出帧序列…", "var(--warn)");
+  const fields = [...document.querySelectorAll(".livefield:checked")].map(x => x.value);
+  const r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields: fields.length ? fields : ["rho"], max_frames: 40,
+                           particles: document.getElementById("liveparticles").checked ? ["electrons"] : [] }) });
+  const out = await r.json();
+  setStatus(r.ok ? `导出 ${out.count} 帧 → ${out.dir}${out.mp4 ? "（含 mp4）" : "（无 ffmpeg，仅 PNG）"}`
+                 : "导出失败: " + (out.detail || ""), r.ok ? "var(--ok)" : "var(--err)");
+};
+// ---- 输入文本页：整页编辑，和表单双向同步 -------------------------------
+
+function showTextPage() {
+  // 独立页面：靠 body 上的 class 统一切换，CSS 用 !important 保证
+  // 下拉/表单重新渲染时不会把表单页或侧边栏又打开（之前的 bug）
+  document.body.classList.add("text-mode");
+  const ta = document.getElementById("inputs-text");
+  // 只有文本确实比表单新时才原样显示；表单改过就按当前 deck 重新生成，
+  // 否则用户会对着上一份旧文本点运行。
+  if (TEXT_AHEAD && SAVED_TEXT !== null) {
+    ta.value = SAVED_TEXT;                       // 原文照搬
+    setTextStatus("未修改", "var(--dim)");
+  } else {
+    setTextStatus("正在按表单生成…", "var(--dim)");
+    formToText();                                // 从当前表单生成一份
+  }
+}
+
+function hideTextPage() {
+  document.body.classList.remove("text-mode");
+  render();
+}
+
+{
+  const cb = document.getElementById("validation-on");
+  if (cb) {
+    cb.checked = VALIDATION_ON;
+    cb.onchange = () => {
+      VALIDATION_ON = cb.checked;
+      if (VALIDATION_ON) {
+        runValidation();
+      } else {
+        LAST_ISSUES = [];
+        markIssues([]);
+        document.getElementById("warn").innerHTML = "";
+        document.getElementById("run").disabled = false;
+        setStatus("已暂停输入校验", "var(--dim)");
+      }
+    };
+  }
+}
+
+document.getElementById("preview").onclick = showTextPage;
+document.getElementById("text-back").onclick = hideTextPage;
+
+document.getElementById("text-save").onclick = () => textToForm();
+{
+  const ta = document.getElementById("inputs-text");
+  ta.addEventListener("input", () => {
+    // 只做提示，不自动解析：自动解析会重新渲染表单、把页面切回去。
+    // 未点「保存」前这份文本不算生效：表单(deck)仍是最近一次成功解析的结果，
+    // 所以 TEXT_AHEAD 置 false，运行不会被一段还没通过解析的文本顶掉。
+    TEXT_AHEAD = false;
+    markDirty(true);
+    setTextStatus("有未保存的修改（点「保存」生效）", "var(--warn)");
+  });
+  // Tab 键插入缩进而不是跳出编辑区
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const p = ta.selectionStart;
+      ta.value = ta.value.slice(0, p) + "  " + ta.value.slice(ta.selectionEnd);
+      ta.selectionStart = ta.selectionEnd = p + 2;
+    }
+  });
+}
+
+function fillBinaries(dims) {
+  const sel = document.getElementById("binary");
+  sel.innerHTML = "";
+  for (const b of BINARIES.filter(x => x.dims === dims)) {
+    const o = document.createElement("option");
+    o.value = b.path;
+    o.textContent = `${b.family || '?'} · ${b.build} · ${b.dims} · ${b.features.slice(0, 4).join(",")}`;
+    sel.appendChild(o);
+  }
+  const preferred = BINARIES.find(b => b.dims === dims && b.build === "fork");
+  if (preferred) sel.value = preferred.path;
+  else if (sel.children.length) sel.selectedIndex = 0;
+}
+
+async function refreshBinaries() {
+  const sel = document.getElementById("binary");
+  const previous = sel.value;
+  const bins = await (await fetch("/api/binaries")).json();
+  BINARIES = bins.binaries;
+  const selEl = document.getElementById("binary");
+  if (selEl) selEl.title = `WarpX root: ${bins.warpx_root || "auto"} | profile: ${bins.profile || "auto"} | data: ${bins.data_root || ""}`;
+  fillBinaries(document.getElementById("dims").value);
+  // 重新枚举不等于把用户选的版本换掉：能用就保留。
+  if (previous && Array.from(sel.children).some(o => o.value === previous)) sel.value = previous;
+}
+
+["binary", "mpi", "omp"].forEach((id) => {
+  const el = document.getElementById(id);
+  // 换二进制/并行度只影响运行设置，不属于 inputs 原文：keepText 保住手写文本。
+  if (el) el.addEventListener("change", () => {
+    markDirty(true);
+    if (id === "binary") {
+      const chosen = el.children[el.selectedIndex];
+      setStatus("可执行文件已切换" + (chosen ? "：" + chosen.textContent : "") + "（点运行生效）",
+                "var(--acc)");
+    }
+  });
+});
+
+document.addEventListener("DOMContentLoaded", () => {});
+async function switchDims(dims) {
+  fillBinaries(dims);
+  const starter = await (await fetch("/api/starter?dims=" + dims)).json();
+  DECK.params = starter.params;
+  DECK.groups = starter.groups;
+  SAVED_TEXT = null; TEXT_AHEAD = false;
+  const ta = document.getElementById("inputs-text");
+  if (ta) ta.value = "";
+  render();
+  markDirty();
+  setStatus(`已切到 ${dims.toUpperCase()}：模板与可用二进制已更新`, "var(--acc)");
+}
+
+// 供自动化测试使用：暴露渲染入口与状态（浏览器里只是普通对象，不影响功能）
+window.__STUDIO_TEST__ = { render: () => render(), getDECK: () => DECK,
+                           setDECK: (d) => { DECK = d; }, visible,
+                           buildHdf5Module: () => buildHdf5Module(),
+                           ruleSatisfied, orderByDependency, CATALOG: () => CATALOG,
+                           setStep: (n) => { STEP = n; }, getStep: () => STEP,
+                           poll: () => poll() };
+
+(async function init() {
+  const data = await (await fetch("/api/catalog")).json();
+  CATALOG = data.catalog; ZH = data.zh;
+  CATALOG_CATEGORIES = data.categories || [];
+  ENUMS = data.enums || {};
+  GLOSSARY = data.glossary || {};
+  DERIVED = data.derived || {};
+  HINTS = data.hints || {};
+  PARAM_BY_NAME = Object.fromEntries(CATALOG.params.map(p => [p.name, p]));
+  CONTROLS = await (await fetch("/api/controls")).json();
+  await refreshBinaries();
+  const projects = await refreshProjects();
+  document.getElementById("dims").onchange = (e) => switchDims(e.target.value);
+  // loadProject 现在自己处理错误并返回 false；打不开上一个任务就退回起步模板，
+  // 不要停在"下拉框显示 A、内容其实是 B"的半状态。
+  const opened = (projects.projects.length && projects.last)
+    ? await loadProject(projects.last) : false;
+  if (!opened) {
+    await loadStarter(); render(); markDirty();
+  }
+  refreshCheckpoints();
+  setInterval(refreshCheckpoints, 5000);
+  refreshIterations();
+  setInterval(refreshIterations, 8000);
+  refreshQuantities();
+  refreshReplay();
+  setInterval(refreshQuantities, 15000);
+  setInterval(refreshReplay, 8000);
+  refreshGallery();
+  // 页面刷新/服务重启后也要知道有没有算例在跑：否则界面显示空闲、点运行才收到
+  // 409 "a simulation is already running"，而且「运行」按钮一直可点。
+  poll();
+})();
+</script>
+</body>
+</html>
